@@ -325,7 +325,11 @@ const getPOComments = async (req, res) => {
       .lean();
 
     if (!approval || approval.approval_hierarchy.length === 0) {
-      return res.status(404).json({ message: "No Approval and comments found for the given PO", success: false });
+      return res.status(200).json({ 
+        message: "No Approval and comments found for the given PO",
+        data:[],
+        success: true 
+      });
     }
 
     // Map through the approval hierarchy to fetch comments, actions, and user details

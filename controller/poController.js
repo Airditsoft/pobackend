@@ -119,17 +119,15 @@ const saveAllPOData = async (req, res) => {
   }
 };
 
-
-
-
-
-
-
-
 const getPOdetails = async (req, res) => {
   try {
     const { depId, level } = req.authInfo.department;
     const appLevel = `${depId} ${level}`;
+
+    // Pagination and search parameters from query
+    const { page = 2, limit = 5, search = "" } = req.query; // Defaults to page 1 and limit 10
+    const skip = (page - 1) * limit;
+
 
     // Fetch the pending status key from the Status collection
     const pendingStatus = await Status.findOne({ key: 201 }, '-_id key').lean();
@@ -146,38 +144,66 @@ const getPOdetails = async (req, res) => {
     // Fetch users for the first approval level
     const user = await User.findOne({
       'department.depId': department._id,
-      'department.level': { $ne: 0 } // Exclude level 0
+      'department.level': { $ne: 0 }, // Exclude level 0
     })
       .sort({ 'department.level': 1 }) // Sort by level ascending
       .lean();
+
+      
 
     if (!user) {
       return res.status(404).json({ message: 'No user found for approval', success: false });
     }
 
-    // Fetch POs based on approval level
-    let poDetails;
+    // Build the base query for POs
+    const baseQuery = {
+      ApprovalStatus: pendingStatus.key, // Only pending status
+    };
+
+    // Handle approval level conditions
     const firstApprovalLevel = `${user.department.depId} ${user.department.level}`;
-    if (appLevel === firstApprovalLevel) {
-      poDetails = await PODetails.find({
-        currentapprovallevel: null,
-        ApprovalStatus: pendingStatus.key, // Check against the pending status key
-      }, '-currentapprovallevel -__v').lean();
-    } else {
-      poDetails = await PODetails.find({
-        currentapprovallevel: appLevel,
-        ApprovalStatus: pendingStatus.key, // Check against the pending status key
-      }, '-currentapprovallevel -__v').lean();
+    if (appLevel) {
+      if (appLevel === firstApprovalLevel) {
+        baseQuery.$and = [
+          { $or: [{ currentapprovallevel: null }, { currentapprovallevel: appLevel }] },
+          { ApprovalStatus: pendingStatus.key },
+        ];
+      } else {
+        baseQuery.$and = [
+          { currentapprovallevel: appLevel },
+          { ApprovalStatus: pendingStatus.key },
+        ];
+      }
+    }
+    
+    // Build dynamic search query for string fields, excluding specific fields
+    if (search && search.trim().replace(/[^a-zA-Z0-9]/g, "") !== "") {
+      const searchQuery = { $regex: search, $options: "i" }; // Case-insensitive regex
+      const excludedFields = ['ApprovalStatus', 'currentapprovallevel'];
+      const stringFields = Object.keys(PODetails.schema.paths).filter(
+        (field) => PODetails.schema.paths[field].instance === "String" && !excludedFields.includes(field)
+      );
+    
+      baseQuery.$and.push({
+        $or: stringFields.map((field) => ({ [field]: searchQuery })),
+      });
     }
 
-    if (!poDetails || poDetails.length === 0) {
+  console.log(JSON.stringify(baseQuery))
+    // Fetch paginated PO details
+    const poDetails = await PODetails.find(baseQuery, '-currentapprovallevel -__v')
+      .skip(skip)
+      .limit(Number(limit))
+      .lean();
+
+    if (!poDetails.length) {
       return res.status(404).json({
         message: `No POs found for approval by ${req.authInfo.name}`,
         success: false,
       });
     }
 
-    // Fetch associated items for each PO and calculate item counts
+    // Fetch associated items for each PO
     const poWithItems = await Promise.all(
       poDetails.map(async (po) => {
         const items = await POItem.find({ PONumber: po._id }, '-PONumber -__v').lean();
@@ -187,10 +213,15 @@ const getPOdetails = async (req, res) => {
 
 
 
+    // Total count for pagination
+    const totalCount = await PODetails.countDocuments(baseQuery);
+
     return res.status(200).json({
       data: {
-        poDetailsCount: poDetails.length, // Total number of POs
-        poWithItems,                     // Details of POs with items
+        poWithItems, // Details of POs with items
+        currentPage: Number(page),
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
       },
       success: true,
     });
@@ -199,6 +230,86 @@ const getPOdetails = async (req, res) => {
     return res.status(500).json({ message: 'An error occurred', success: false });
   }
 };
+
+
+
+
+// const getPOdetails = async (req, res) => {
+//   try {
+//     const { depId, level } = req.authInfo.department;
+//     const appLevel = `${depId} ${level}`;
+
+//     // Fetch the pending status key from the Status collection
+//     const pendingStatus = await Status.findOne({ key: 201 }, '-_id key').lean();
+//     if (!pendingStatus) {
+//       return res.status(400).json({ message: 'Pending status not configured', success: false });
+//     }
+
+//     // Fetch the first approval level's department
+//     const department = await Department.findOne({ 'department.level': { $ne: 0 } }).sort().lean();
+//     if (!department) {
+//       return res.status(404).json({ message: 'No departments found for approval', success: false });
+//     }
+
+//     // Fetch users for the first approval level
+//     const user = await User.findOne({
+//       'department.depId': department._id,
+//       'department.level': { $ne: 0 } // Exclude level 0
+//     })
+//       .sort({ 'department.level': 1 }) // Sort by level ascending
+//       .lean();
+
+//     if (!user) {
+//       return res.status(404).json({ message: 'No user found for approval', success: false });
+//     }
+
+//     // Fetch POs based on approval level
+//     let poDetails;
+//     const firstApprovalLevel = `${user.department.depId} ${user.department.level}`;
+// if (appLevel === firstApprovalLevel) {
+//   poDetails = await PODetails.find({
+//     $or: [
+//       { currentapprovallevel: null },
+//       { currentapprovallevel: firstApprovalLevel }
+//     ],
+//     ApprovalStatus: pendingStatus.key  // Check against the pending status key
+//   }, '-currentapprovallevel -__v').lean();
+// } else {
+//       poDetails = await PODetails.find({
+//         currentapprovallevel: appLevel,
+//         ApprovalStatus: pendingStatus.key, // Check against the pending status key
+//       }, '-currentapprovallevel -__v').lean();
+//     }
+
+//     if (!poDetails || poDetails.length === 0) {
+//       return res.status(404).json({
+//         message: `No POs found for approval by ${req.authInfo.name}`,
+//         success: false,
+//       });
+//     }
+
+//     // Fetch associated items for each PO and calculate item counts
+//     const poWithItems = await Promise.all(
+//       poDetails.map(async (po) => {
+//         const items = await POItem.find({ PONumber: po._id }, '-PONumber -__v').lean();
+//         return { ...po, items };
+//       })
+//     );
+
+
+
+//     return res.status(200).json({
+//       data: {
+//         poDetailsCount: poDetails.length, // Total number of POs
+//         poWithItems,                     // Details of POs with items
+//       },
+//       success: true,
+//     });
+//   } catch (error) {
+//     console.error('Error fetching PO details with items:', error.message);
+//     return res.status(500).json({ message: 'An error occurred', success: false });
+//   }
+// };
 
 
 
