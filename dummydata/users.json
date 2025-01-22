@@ -1,0 +1,110 @@
+[{
+  "_id": { "$oid": "6759466c367f1a549435c270" },
+  "name": "John Doe",
+  "email": "john.doe@example.com",
+  "phonenumber": "1234567890",
+  "role": { "$oid": "675c08c473be70222033dd7e" },
+  "department": {
+    "depId": { "$oid": "675adf0490c6161d82d2df1a" },
+    "level": 2
+  }
+},
+{
+  "_id": { "$oid": "6759466c367f1a549435c271" },
+  "name": "Jane Smith",
+  "email": "jane.smith@example.com",
+  "phonenumber": "9876543210",
+  "role": { "$oid": "675c08c473be70222033dd7e" },
+  "department": {
+    "depId": { "$oid": "675adf0490c6161d82d2df1a" },
+    "level": 1
+  }
+},
+{
+  "_id": { "$oid": "6759466c367f1a549435c272" },
+  "name": "Robert Brown",
+  "email": "robert.brown@example.com",
+  "phonenumber": "1122334455",
+  "role": { "$oid": "675c08c473be70222033dd7e" },
+  "department": {
+    "depId": { "$oid": "675adf0490c6161d82d2df1c" },
+    "level": 1
+  }
+},
+{
+  "_id": { "$oid": "6759466c367f1a549435c273" },
+  "name": "Emily Davis",
+  "email": "emily.davis@example.com",
+  "phonenumber": "5566778899",
+  "role": { "$oid": "675c08c473be70222033dd7e" },
+  "department": {
+    "depId": { "$oid": "675adf0490c6161d82d2df1c" },
+    "level": 2
+  }
+},
+{
+  "_id": { "$oid": "6759466c367f1a549435c274" },
+  "name": "Michael Johnson",
+  "email": "michael.johnson@example.com",
+  "phonenumber": "6677889900",
+  "role": { "$oid": "675c08c473be70222033dd7e" },
+  "department": {
+    "depId": { "$oid": "675adf0490c6161d82d2df1c" },
+    "level": 3
+  }
+},
+{
+  "_id": { "$oid": "6759466c367f1a549435c275" },
+  "name": "Sarah Lee",
+  "email": "sarah.lee@example.com",
+  "phonenumber": "7788990011",
+  "role": { "$oid": "675c08c473be70222033dd7e" },
+  "department": {
+    "depId": { "$oid": "675adf0490c6161d82d2df1b" },
+    "level": 1
+  }
+},
+{
+  "_id": { "$oid": "6759466c367f1a549435c276" },
+  "name": "David Clark",
+  "email": "david.clark@example.com",
+  "phonenumber": "8899001122",
+  "role": { "$oid": "675c08c473be70222033dd7e" },
+  "department": {
+    "depId": { "$oid": "675adf0490c6161d82d2df1b" },
+    "level": 2
+  }
+},
+{
+  "_id": { "$oid": "6759466c367f1a549435c277" },
+  "name": "Anna Baker",
+  "email": "anna.baker@example.com",
+  "phonenumber": "9900112233",
+  "role": { "$oid": "675c08c473be70222033dd7e" },
+  "department": {
+    "depId": { "$oid": "675adf0490c6161d82d2df1b" },
+    "level": 3
+  }
+},
+{
+  "_id": { "$oid": "6759466c367f1a549435c278" },
+  "name": "James Wilson",
+  "email": "james.wilson@example.com",
+  "phonenumber": "1100223344",
+  "role": { "$oid": "675c08c473be70222033dd7e" },
+  "department": {
+    "depId": { "$oid": "675adf0490c6161d82d2df1b" },
+    "level": 4
+  }
+},
+{
+  "_id": { "$oid": "6759466c367f1a549435c279" },
+  "name": "Amiya",
+  "email": "amiyaairdit@gmail.com",
+  "phonenumber": "2200334455",
+  "role": { "$oid": "675c08c473be70222033dd7f" },
+  "department": {
+    "depId": { "$oid": "675c13bd735f9739d84c8b3e" },
+    "level": 0
+  }
+}]

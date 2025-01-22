@@ -1,0 +1,73 @@
+[
+    {
+      "_id": {
+        "$oid": "670f92754839dea500adc176"
+      },
+      "designation": "RM",
+      "level": 1
+    },
+    {
+      "_id": {
+        "$oid": "670f96ca25985a7854e1afcb"
+      },
+      "designation": "HR",
+      "level": 2
+    },
+    {
+      "_id": {
+        "$oid": "672098fb39f51c5fb88d80d7"
+      },
+      "designation": "SeniorHR",
+      "level": 3
+    },
+    {
+      "_id": {
+        "$oid": "672098fb39f51c5fb88d80e8"
+      },
+      "designation": "Manager",
+      "level": 4
+    },
+    {
+      "_id": {
+        "$oid": "672098fb39f51c5fb88d80f9"
+      },
+      "designation": "Team Lead",
+      "level": 5
+    },
+    {
+      "_id": {
+        "$oid": "672098fb39f51c5fb88d8100"
+      },
+      "designation": "Developer",
+      "level": 6
+    },
+    {
+      "_id": {
+        "$oid": "672098fb39f51c5fb88d8111"
+      },
+      "designation": "Senior Developer",
+      "level": 7
+    },
+    {
+      "_id": {
+        "$oid": "672098fb39f51c5fb88d8122"
+      },
+      "designation": "Finance Manager",
+      "level": 8
+    },
+    {
+      "_id": {
+        "$oid": "672098fb39f51c5fb88d8133"
+      },
+      "designation": "Finance Executive",
+      "level": 9
+    },
+    {
+      "_id": {
+        "$oid": "672098fb39f51c5fb88d8144"
+      },
+      "designation": "CEO",
+      "level": 10
+    }
+  ]
+  

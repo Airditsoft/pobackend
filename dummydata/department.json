@@ -1,0 +1,45 @@
+[{
+  "_id": {
+    "$oid": "675adf0490c6161d82d2df1a"
+  },
+  "type": "HR",
+  "lastlevel": 2,
+  "__v": 0,
+  "approval_level": {
+    "$numberLong": "1"
+  }
+},
+{
+  "_id": {
+    "$oid": "675adf0490c6161d82d2df1b"
+  },
+  "type": "Manager",
+  "lastlevel": 4,
+  "__v": 0,
+  "approval_level": {
+    "$numberLong": "3"
+  }
+},
+{
+  "_id": {
+    "$oid": "675adf0490c6161d82d2df1c"
+  },
+  "type": "Finance",
+  "lastlevel": 3,
+  "__v": 0,
+  "approval_level": {
+    "$numberLong": "2"
+  }
+},
+{
+  "_id": {
+    "$oid": "675c13bd735f9739d84c8b3e"
+  },
+  "type": "Admin",
+  "lastlevel": {
+    "$numberLong": "0"
+  },
+  "approval_level": {
+    "$numberLong": "0"
+  }
+}]
