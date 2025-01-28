@@ -51,7 +51,34 @@ const attachmentSchema = new Schema({
             type: Date,
             default: Date.now,
         },
-    }]
+    }],
+    pocomments: {
+        type: [
+          {
+            departmentId: { 
+              type: Schema.Types.ObjectId,  // Corrected to ObjectId
+              required: true,
+              ref: "Department"
+            },
+            level: { 
+              type: Number, 
+              required: true 
+            },
+            comment: { 
+              type: String 
+            },
+            createdAt: { 
+              type: Date, 
+              default: Date.now 
+            }, // Manually add createdAt
+  
+      }
+      ],
+  
+      _id: false, // Disables the `_id` field for subdocuments in this array
+      default: []
+  
+    } 
 });
 
 const Attachment = mongoose.model('Attachment', attachmentSchema);

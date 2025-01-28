@@ -4,107 +4,99 @@ const Attachment = require('../models/attachment');
 const PODetails = require('../models/podetails');
 const { link } = require('joi');
 
-
-// Azure Blob Storage configuration
 const AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING; // Azure connection string
-const CONTAINER_NAME = 'poc-files'; //  container name
-
-
+const CONTAINER_NAME = 'poc-files'; // Azure Blob Storage container name
 
 const uploadMultipleFiles = async (req, res) => {
-  const { PONumber } = req.params; // Get PONumber from the URL
-  const { name } = req.authInfo; // Assuming `username` is available in `req.authInfo`
+    const { PONumber } = req.params; // Get PONumber from the URL
+    const { name } = req.authInfo; // Assuming `username` is available in `req.authInfo`
 
-  if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ message: 'No files uploaded', success: false });
-  }
+    if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ message: 'No files uploaded', success: false });
+    }
 
-  const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
-  const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
-  await containerClient.createIfNotExists();
+    const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
+    const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
+    await containerClient.createIfNotExists();
 
-  let uploadResponses = [];
-  for (const file of req.files) {
-      const blobName = `${Date.now()}-${file.originalname}`;
-      const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+    let uploadResponses = [];
+    for (const file of req.files) {
+        const blobName = `${Date.now()}-${file.originalname}`;
+        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
-      // Upload file to Azure Blob Storage
-      await blockBlobClient.uploadFile(file.path);
+        // Upload file with the correct MIME type
+        await blockBlobClient.uploadFile(file.path, {
+            blobHTTPHeaders: { blobContentType: 'application/pdf' },
+        });
 
-      // Push file details to the response array
-      uploadResponses.push({
-          blobName,
-          url: blockBlobClient.url,
-          size: file.size, // Include file size in bytes
-          uploadedBy: name, // Username of the uploader
-          createdAt: new Date(), // Current timestamp
-      });
+        uploadResponses.push({
+            blobName,
+            url: blockBlobClient.url,
+            size: file.size, // Include file size in bytes
+            uploadedBy: name, // Username of the uploader
+            createdAt: new Date(), // Current timestamp
+        });
 
-      // Remove file from the server after uploading
-      fs.unlinkSync(file.path);
-  }
+        // Remove file from the server after uploading
+        fs.unlinkSync(file.path);
+    }
 
-  // Save to MongoDB
-  try {
-      const poAttachment = await Attachment.findOneAndUpdate(
-          { PONumber }, // Match the specific PONumber
-          { $push: { attachments: { $each: uploadResponses } } },
-          { new: true, upsert: true } // Create a new document if it doesn't exist
-      );
+    // Save to MongoDB
+    try {
+        const poAttachment = await Attachment.findOneAndUpdate(
+            { PONumber },
+            { $push: { attachments: { $each: uploadResponses } } },
+            { new: true, upsert: true } // Create a new document if it doesn't exist
+        );
 
-      res.status(200).json({
-          message: 'Files uploaded and saved successfully',
-          success: true,
-          data: uploadResponses,
-      });
-  } catch (error) {
-      console.error('Error saving file details to MongoDB:', error);
-      res.status(500).json({
-          message: 'An error occurred while saving file details',
-          success: false,
-          error: error.message,
-      });
-  }
+        res.status(200).json({
+            message: 'Files uploaded and saved successfully',
+            success: true,
+            data: uploadResponses,
+        });
+    } catch (error) {
+        console.error('Error saving file details to MongoDB:', error);
+        res.status(500).json({
+            message: 'An error occurred while saving file details',
+            success: false,
+            error: error.message,
+        });
+    }
 };
 
-
-
 const getAttachment = async (req, res) => {
-  const { PONumber } = req.params;
+    const { PONumber } = req.params;
 
-  try {
-      // Check if the PO exists
-      const PO = await PODetails.findOne({ _id: PONumber });
-      if (!PO) {
-          return res.status(404).json({ message: 'PO not found', success: false });
-      }
+    try {
+        const PO = await PODetails.findOne({ _id: PONumber });
+        if (!PO) {
+            return res.status(404).json({ message: 'PO not found', success: false });
+        }
 
-      // Fetch attachments from the database
-      const poAttachment = await Attachment.findOne({ PONumber });
+        const poAttachment = await Attachment.findOne({ PONumber });
+        if (!poAttachment) {
+            return res.status(200).json({
+                attachment: [],
+                message: 'No attachments found for the Purchase Order',
+                success: true,
+            });
+        }
 
-      if (!poAttachment) {
-          return res.status(200).json({
-              attachment: [],
-              message: `No attachments found for the Purchase Order`,
-              success: true,
-          });
-      }
-
-      return res.status(200).json({
-          attachment: poAttachment.attachments.map((file) => ({
-              blobName: file.blobName,
-              url: file.url,
-              size: file.size, // File size
-              uploadedBy: file.uploadedBy, // Uploader
-              createdAt: file.createdAt, // Upload timestamp
-          })),
-          message: 'Fetched Successfully',
-          success: true,
-      });
-  } catch (error) {
-      console.error('Error fetching attachments:', error.message);
-      return res.status(500).json({ message: 'An error occurred', success: false });
-  }
+        return res.status(200).json({
+            attachment: poAttachment.attachments.map((file) => ({
+                blobName: file.blobName,
+                url: file.url,
+                size: file.size,
+                uploadedBy: file.uploadedBy,
+                createdAt: file.createdAt,
+            })),
+            message: 'Fetched Successfully',
+            success: true,
+        });
+    } catch (error) {
+        console.error('Error fetching attachments:', error.message);
+        return res.status(500).json({ message: 'An error occurred', success: false });
+    }
 };
 
 

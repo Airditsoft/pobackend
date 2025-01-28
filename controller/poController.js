@@ -56,6 +56,7 @@ const saveAllPOData = async (req, res) => {
       return {
         ...filteredItem,
         CreatedOn: parseODataDate(CreatedOn),
+        Read:0,
         ApprovalStatus: Approval === 'Pending' ? 201 : 202// Convert OData date format
       };
     });
@@ -295,6 +296,7 @@ if (appLevel === firstApprovalLevel) {
         return { ...po, items };
       })
     );
+    
 
 
 

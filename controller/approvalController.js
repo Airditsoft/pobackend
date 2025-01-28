@@ -10,7 +10,111 @@ const Status = require('../models/status');
 const {approvalSchema} = require('../validation/validator');
 const getLevels = require('../ApprovalLevels/getLevels');
 const CustomLevels = require('../ApprovalLevels/customLevels');
+const Attachment = require('../models/attachment');
 
+
+
+
+const showLogs = async (req, res) => {
+  const { PONumberId } = req.params;
+
+  try {
+    const PO = await PODetails.findOne({ _id: PONumberId });
+
+    if (!PO) {
+      return res.status(404).json({ message: `PO not found`, success: false });
+    }
+
+    // Fetch the Approval Levels
+    let approvalLevels;
+    if (PO.approvaltype === 0) {
+      approvalLevels = await getLevels(PONumberId);
+    } else {
+      approvalLevels = await CustomLevels(PONumberId);
+    } 
+
+    console.log('Approval Levels:', approvalLevels);
+
+    const logs = [];
+    const approval = await Approval.findOne({ PONumber: PONumberId });
+
+    if (!approval) {
+      // If approval is not present, assume all levels are pending
+      for (let i of approvalLevels) {
+        const [departmentId, level] = i.split(" ");
+        const user = await User.findOne({
+          "department.depId": departmentId,
+          "department.level": level,
+        });
+
+        if (user) {
+          logs.push({
+            username: user.name,
+            status: "pending",
+            comment: null,
+            createdAt: null,
+          });
+        }
+      }
+
+      console.log('Logs:', logs);
+
+      return res.status(200).json({ status: PO.ApprovalStatus, logs, success: true });
+    } else {
+
+        // if(PO.ApprovalStatus === 202 && PO.currentapprovallevel === null){
+        //   return res.status(200).json({ status: PO.ApprovalStatus, logs, success: true });
+        // }
+
+          for(let i of approval.approval_hierarchy){
+            const user = await User.findOne({
+              "department.depId": i.departmentId,
+              "department.level": i.level,
+            });
+            if (user) {
+              logs.push({
+                username: user ? user.name : "Unknown User",
+                status: i.action === "approve" ? "approved" : "rejected",
+                comment: i.comment,
+                createdAt: i.createdAt,
+              });
+            }
+
+          }
+          console.log('LogsTill hierarchy.........:', approvalLevels);
+          console.log('LogsTill hierarchy.........:', PO);
+            const currentLevel = approvalLevels.indexOf(PO.currentapprovallevel);
+            console.log('CurrentLevel:', currentLevel);
+    if(currentLevel !== -1){
+        // If approval is present, iterate through approval levels
+        for (let i = currentLevel; i < approvalLevels.length; i++) {
+          const [departmentId, level] = approvalLevels[i].split(" ");
+          const user = await User.findOne({
+            "department.depId": departmentId,
+            "department.level": level,
+          });
+  
+         
+              // If not in the approval hierarchy, mark it as pending
+              logs.push({
+                username: user.name,
+                status: "pending",
+                comment: null,
+                createdAt:null
+              });
+          
+        }
+      
+         }   console.log('LogsTillENd.........:', logs);
+      return res.status(200).json({ status: PO.ApprovalStatus, logs, success: true });
+    }
+  } catch (error) {
+    console.error("Error:", error.message);
+    return res
+      .status(500)
+      .json({ message: "An error occurred", success: false });
+  }
+};
 
 
 
@@ -102,7 +206,7 @@ const handleApprovalOrRejection = async (req, res) => {
   }
 
   try {
-    console.log(PONumberId);
+    // Fetch the PO details
     const app_level = `${req.authInfo.department.depId} ${req.authInfo.department.level}`;
     const PO = await PODetails.findOne({ _id: PONumberId });
 
@@ -317,14 +421,15 @@ const getPOComments = async (req, res) => {
       return res.status(400).json({message:`PO not Found`,success:false})
     }
     // Find the approval document for the given PONumberId
-    const approval = await Approval.findOne({ PONumber: PONumberId })
+    const approval = await Attachment.findOne({ PONumber: PONumberId })
       .populate({
-        path: "approval_hierarchy.departmentId",
+        path: "pocomments.departmentId",
         select: "type", // Include department type for additional information
       })
       .lean();
+      console.log('approval',approval)
 
-    if (!approval || approval.approval_hierarchy.length === 0) {
+    if (!approval || approval.pocomments.length === 0) {
       return res.status(200).json({ 
         message: "No Approval and comments found for the given PO",
         data:[],
@@ -334,7 +439,7 @@ const getPOComments = async (req, res) => {
 
     // Map through the approval hierarchy to fetch comments, actions, and user details
     const commentsWithUser = await Promise.all(
-      approval.approval_hierarchy.map(async (approvalItem) => {
+      approval.pocomments.map(async (approvalItem) => {
         const user = await User.findOne({
           "department.depId": approvalItem.departmentId._id,
           "department.level": approvalItem.level,
@@ -342,7 +447,6 @@ const getPOComments = async (req, res) => {
 
         return {
           comment: approvalItem.comment,
-          action: approvalItem.action,
           createdAt: approvalItem.createdAt,
           department: approvalItem.departmentId.type, // Include department type
           level: approvalItem.level,
@@ -375,15 +479,14 @@ const addComments = async (req, res) => {
     }
 
     // Add comment to the approval hierarchy
-    const updatedApproval = await Approval.findOneAndUpdate(
+    const updatedApproval = await Attachment.findOneAndUpdate(
       { PONumber: PONumberId }, // Match the specific PONumber
       {
         $push: {
-          approval_hierarchy: {
+          pocomments: {
             departmentId: req.authInfo.department.depId, // Assuming you have department ID in `req.authInfo`
             level: req.authInfo.department.level,       // Assuming `level` is available in `req.authInfo`
-            comment,
-            action:null,
+            comment,                                   // Add the comment
             createdAt: new Date(),                      // Add the current date
           },
         },
@@ -420,7 +523,8 @@ module.exports = {
                     getApprovalHistory,
                     getAnalytics,
                     getPOComments,
-                    addComments
+                    addComments,
+                    showLogs
                   
                   };
 
