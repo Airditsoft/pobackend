@@ -233,12 +233,11 @@ const saveAllPOData = async (req, res) => {
 // };
 
 
-
-
 const getPOdetails = async (req, res) => {
   try {
     const { depId, level } = req.authInfo.department;
     const appLevel = `${depId} ${level}`;
+    const { filter } = req.query; // Get filter from query params
 
     // Fetch the pending status key from the Status collection
     const pendingStatus = await Status.findOne({ key: 201 }, '-_id key').lean();
@@ -264,21 +263,32 @@ const getPOdetails = async (req, res) => {
       return res.status(404).json({ message: 'No user found for approval', success: false });
     }
 
-    // Fetch POs based on approval level
+    // Build filter condition for Read status
+    let readFilter = {};
+    if (filter === "Unread") {
+      readFilter = { Read: 0 };
+    } else if (filter === "Read") {
+      readFilter = { Read: 1 };
+    }
+
+    // Fetch POs based on approval level + Read filter
     let poDetails;
     const firstApprovalLevel = `${user.department.depId} ${user.department.level}`;
-if (appLevel === firstApprovalLevel) {
-  poDetails = await PODetails.find({
-    $or: [
-      { currentapprovallevel: null },
-      { currentapprovallevel: firstApprovalLevel }
-    ],
-    ApprovalStatus: pendingStatus.key  // Check against the pending status key
-  }, '-currentapprovallevel -__v').lean();
-} else {
+
+    if (appLevel === firstApprovalLevel) {
+      poDetails = await PODetails.find({
+        $or: [
+          { currentapprovallevel: null },
+          { currentapprovallevel: firstApprovalLevel }
+        ],
+        ApprovalStatus: pendingStatus.key,  // Check against the pending status key
+        ...readFilter // Apply Read filter condition
+      }, '-currentapprovallevel -__v').lean();
+    } else {
       poDetails = await PODetails.find({
         currentapprovallevel: appLevel,
         ApprovalStatus: pendingStatus.key, // Check against the pending status key
+        ...readFilter // Apply Read filter condition
       }, '-currentapprovallevel -__v').lean();
     }
 
@@ -296,9 +306,11 @@ if (appLevel === firstApprovalLevel) {
         return { ...po, items };
       })
     );
-    
 
-
+    // Update the 'Read' field of the first PO in the list (only if it's unread)
+    if (poWithItems.length > 0 && poWithItems[0].Read === 0) {
+      await PODetails.updateOne({ _id: poWithItems[0]._id }, { $set: { Read: 1 } });
+    }
 
     return res.status(200).json({
       data: {
@@ -315,8 +327,9 @@ if (appLevel === firstApprovalLevel) {
 
 
 
-// Function to fetch PO details with associated PO Items
 
+
+// Function to fetch PO details with associated PO Items
 const POdetail = async (req, res) => {
   const { PONumberId } = req.params; // Fetching PONumberId from request params
 
@@ -327,6 +340,9 @@ const POdetail = async (req, res) => {
       return res.status(404).json({ message: 'PO Details not found', success: false });
     }
 
+    // Update the 'Read' field to 1
+    await PODetails.updateOne({ _id: PONumberId }, { $set: { Read: 1 } });
+
     // Fetch associated PO Items in a single query
     const poItems = await POItem.find({ PONumber: PONumberId }, '-PONumber -_id -__v').lean();
 
@@ -334,7 +350,7 @@ const POdetail = async (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
-        poDetails,
+        poDetails: { ...poDetails, Read: 1 }, // Ensure frontend gets updated value
         poItems,
       },
     });

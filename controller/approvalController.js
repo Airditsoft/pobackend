@@ -214,6 +214,9 @@ const handleApprovalOrRejection = async (req, res) => {
       return res.status(404).json({ message: 'PO not found', success: false });
     }
 
+     // Update the 'Read' field to 1
+        await PODetails.updateOne({ _id: PONumberId }, { $set: { Read: 0 } });
+
     // Fetch both pending and approved statuses in a single query
     const statuses = await Status.find({ key: { $in: [200, 202] } }, '-_id key').lean();
     const approvedStatus = statuses.find((status) => status.key === 200);
