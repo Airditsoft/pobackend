@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-
+const mongoose = require("mongoose");
 const PODetails = require('../models/podetails');
 const logger = require('../logger/logger');
 const User = require('../models/user');
@@ -184,60 +184,65 @@ const getApprovalHistory = async (req, res) => {
 
 
 
+
+
 const handleApprovalOrRejection = async (req, res) => {
   const { PONumberId } = req.params;
   const { action, comment } = req.body;
 
+  // Start a Mongoose session for the transaction
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    // Validate the request body against the approval schema
+    // Validate the request body
     const { error } = approvalSchema.validate(req.body);
     if (error) {
+      await session.abortTransaction(); // Abort transaction on validation failure
+      session.endSession();
       return res.status(400).json({
-        message: 'Validation Error',
-        details: error.details.map((err) => err.message.replace(/"/g, '')),
+        message: "Validation Error",
+        details: error.details.map((err) => err.message.replace(/"/g, "")),
         success: false,
       });
     }
-  } catch (err) {
-    return res.status(500).json({
-      message: 'An error occurred during validation',
-      success: false,
-    });
-  }
 
-  try {
-    // Fetch the PO details
+    // Fetch the PO details within the transaction
     const app_level = `${req.authInfo.department.depId} ${req.authInfo.department.level}`;
-    const PO = await PODetails.findOne({ _id: PONumberId });
+    const PO = await PODetails.findOne({ _id: PONumberId }).session(session);
 
     if (!PO) {
-      return res.status(404).json({ message: 'PO not found', success: false });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "PO not found", success: false });
     }
 
-     // Update the 'Read' field to 1
-        await PODetails.updateOne({ _id: PONumberId }, { $set: { Read: 0 } });
+    // Update the 'Read' field to 1 inside the transaction
+    await PODetails.updateOne({ _id: PONumberId }, { $set: { Read: 0 } }).session(session);
 
     // Fetch both pending and approved statuses in a single query
-    const statuses = await Status.find({ key: { $in: [200, 202] } }, '-_id key').lean();
+    const statuses = await Status.find({ key: { $in: [200, 202] } }, "-_id key").lean();
     const approvedStatus = statuses.find((status) => status.key === 200);
     const rejectedStatus = statuses.find((status) => status.key === 202);
 
     if (!rejectedStatus || !approvedStatus) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
-        message: 'Required statuses (Rejected or Approved) not configured',
+        message: "Required statuses (Rejected or Approved) not configured",
         success: false,
       });
     }
 
-    if (
-      PO.ApprovalStatus === rejectedStatus.key ||
-      PO.ApprovalStatus === approvedStatus.key
-    ) {
+    // Check if PO is already Approved or Rejected
+    if (PO.ApprovalStatus === rejectedStatus.key || PO.ApprovalStatus === approvedStatus.key) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         message: `Permission denied. Cannot ${
-          action === 'approve' ? 'Approve' : 'Reject'
+          action === "approve" ? "Approve" : "Reject"
         } PO ${PO.PONumber} as it is already ${
-          PO.ApprovalStatus === approvedStatus.key ? 'Approved' : 'Rejected'
+          PO.ApprovalStatus === approvedStatus.key ? "Approved" : "Rejected"
         }`,
         success: false,
       });
@@ -250,9 +255,11 @@ const handleApprovalOrRejection = async (req, res) => {
       approvalLevels = await CustomLevels(PONumberId);
     }
 
-    // Check if current approval level matches or is null
+    // Check if the user has sufficient approval level
     if (PO.currentapprovallevel === null) {
       if (approvalLevels[0] !== app_level) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({
           message: `Approval failed by ${req.authInfo.name} due to insufficient approval level`,
           success: false,
@@ -260,6 +267,8 @@ const handleApprovalOrRejection = async (req, res) => {
       }
     } else {
       if (PO.currentapprovallevel !== app_level) {
+        await session.abortTransaction();
+        session.endSession();
         return res.status(400).json({
           message: `Approval failed by ${req.authInfo.name} due to insufficient approval level`,
           success: false,
@@ -277,7 +286,7 @@ const handleApprovalOrRejection = async (req, res) => {
     };
 
     // Handle "approve" action
-    if (action === 'approve') {
+    if (action === "approve") {
       if (approvalLevels.indexOf(app_level) === approvalLevels.length - 1) {
         PO.ApprovalStatus = approvedStatus.key;
         PO.currentapprovallevel = null;
@@ -285,11 +294,11 @@ const handleApprovalOrRejection = async (req, res) => {
         const nextLevel = approvalLevels[approvalLevels.indexOf(app_level) + 1];
         PO.currentapprovallevel = nextLevel;
       }
-      await PO.save();
+      await PO.save({ session });
     }
 
     // Handle "reject" action
-    if (action === 'reject') {
+    if (action === "reject") {
       if (approvalLevels.indexOf(app_level) === 0) {
         PO.ApprovalStatus = rejectedStatus.key;
         PO.currentapprovallevel = null;
@@ -297,11 +306,11 @@ const handleApprovalOrRejection = async (req, res) => {
         const prevLevel = approvalLevels[approvalLevels.indexOf(app_level) - 1];
         PO.currentapprovallevel = prevLevel;
       }
-      await PO.save();
+      await PO.save({ session });
     }
 
     // Check if the PO exists in the Approval table
-    const poApproval = await Approval.findOne({ PONumber: PONumberId });
+    const poApproval = await Approval.findOne({ PONumber: PONumberId }).session(session);
 
     if (!poApproval) {
       // Create a new approval document
@@ -309,25 +318,35 @@ const handleApprovalOrRejection = async (req, res) => {
         PONumber: PONumberId,
         approval_hierarchy: [approvalEntry],
       };
-      await Approval.create(newApprovalData);
+      await Approval.create([newApprovalData], { session });
     } else {
       // Update the existing approval document
       await Approval.findOneAndUpdate(
         { PONumber: PONumberId },
         { $push: { approval_hierarchy: approvalEntry } },
-        { new: true }
+        { new: true, session }
       );
     }
 
+    // ✅ Commit the transaction (Save all changes)
+    await session.commitTransaction();
+    session.endSession();
+
     res.status(200).json({
-      message: `${action === 'approve' ? 'Approved' : 'Rejected'} PO ${PO.PONumber} by ${req.authInfo.name}`,
+      message: `${action === "approve" ? "Approved" : "Rejected"} PO ${PO.PONumber} by ${req.authInfo.name}`,
       success: true,
     });
+
   } catch (error) {
-    console.error('Error:', error.message);
-    res.status(500).json({ message: 'An error occurred', success: false });
+    // ❌ Rollback transaction if an error occurs
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("Transaction Error:", error.message);
+    res.status(500).json({ message: "An error occurred", success: false });
   }
 };
+
 
 
 

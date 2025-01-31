@@ -1,6 +1,7 @@
 require('dotenv').config();
 const axios = require('axios');
 const https = require('https');
+const mongoose = require("mongoose");
 
 // Imports
 const PODetails = require('../models/podetails');
@@ -327,24 +328,35 @@ const getPOdetails = async (req, res) => {
 
 
 
-
-
-// Function to fetch PO details with associated PO Items
 const POdetail = async (req, res) => {
   const { PONumberId } = req.params; // Fetching PONumberId from request params
 
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    // Fetch PO Details
-    const poDetails = await PODetails.findById(PONumberId, '-currentapprovallevel -__v').lean();
+    // Fetch PO Details within the transaction
+    const poDetails = await PODetails.findById(PONumberId, "-currentapprovallevel -__v")
+      .session(session)
+      .lean();
+
     if (!poDetails) {
-      return res.status(404).json({ message: 'PO Details not found', success: false });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "PO Details not found", success: false });
     }
 
-    // Update the 'Read' field to 1
-    await PODetails.updateOne({ _id: PONumberId }, { $set: { Read: 1 } });
+    // Update the 'Read' field to 1 within the transaction
+    await PODetails.updateOne({ _id: PONumberId }, { $set: { Read: 1 } }).session(session);
 
-    // Fetch associated PO Items in a single query
-    const poItems = await POItem.find({ PONumber: PONumberId }, '-PONumber -_id -__v').lean();
+    // Fetch associated PO Items in a single query within the transaction
+    const poItems = await POItem.find({ PONumber: PONumberId }, "-PONumber -_id -__v")
+      .session(session)
+      .lean();
+
+    // Commit the transaction after all operations succeed
+    await session.commitTransaction();
+    session.endSession();
 
     // Return response with both PO Details and associated PO Items
     return res.status(200).json({
@@ -355,14 +367,22 @@ const POdetail = async (req, res) => {
       },
     });
   } catch (error) {
-    // Log and return error response
-    console.error('Error fetching PO details:', error.message);
+    // Rollback transaction in case of any failure
+    await session.abortTransaction();
+    session.endSession();
+
+    console.error("Error fetching PO details:", error.message);
     return res.status(500).json({
       success: false,
-      message: 'An error occurred while fetching PO details',
+      message: "An error occurred while fetching PO details",
     });
   }
 };
+
+
+
+
+
 
 
 

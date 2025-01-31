@@ -1,5 +1,6 @@
 const { BlobServiceClient } = require('@azure/storage-blob');
 const fs = require('fs');
+const mongoose = require("mongoose");
 const Attachment = require('../models/attachment');
 const PODetails = require('../models/podetails');
 const { link } = require('joi');
@@ -8,179 +9,211 @@ const AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STR
 const CONTAINER_NAME = 'poc-files'; // Azure Blob Storage container name
 
 const uploadMultipleFiles = async (req, res) => {
-    const { PONumber } = req.params; // Get PONumber from the URL
-    const { name } = req.authInfo; // Assuming `username` is available in `req.authInfo`
+  const { PONumber } = req.params;
+  const { name } = req.authInfo;
 
-    if (!req.files || req.files.length === 0) {
-        return res.status(400).json({ message: 'No files uploaded', success: false });
-    }
+  if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'No files uploaded', success: false });
+  }
 
-    const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
-    const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
-    await containerClient.createIfNotExists();
+  const session = await PODetails.startSession();
+  session.startTransaction();
 
-    let uploadResponses = [];
-    for (const file of req.files) {
-        const blobName = `${Date.now()}-${file.originalname}`;
-        const blockBlobClient = containerClient.getBlockBlobClient(blobName);
+  try {
+      const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
+      const containerClient = blobServiceClient.getContainerClient(CONTAINER_NAME);
+      await containerClient.createIfNotExists();
 
-        // Upload file with the correct MIME type
-        await blockBlobClient.uploadFile(file.path, {
-            blobHTTPHeaders: { blobContentType: 'application/pdf' },
-        });
+      let uploadResponses = [];
+      for (const file of req.files) {
+          const blobName = `${Date.now()}-${file.originalname}`;
+          const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
-        uploadResponses.push({
-            blobName,
-            url: blockBlobClient.url,
-            size: file.size, // Include file size in bytes
-            uploadedBy: name, // Username of the uploader
-            createdAt: new Date(), // Current timestamp
-        });
+          await blockBlobClient.uploadFile(file.path, {
+              blobHTTPHeaders: { blobContentType: 'application/pdf' },
+          });
 
-        // Remove file from the server after uploading
-        fs.unlinkSync(file.path);
-    }
+          uploadResponses.push({
+              blobName,
+              url: blockBlobClient.url,
+              size: file.size,
+              uploadedBy: name,
+              createdAt: new Date(),
+          });
 
-    // Save to MongoDB
-    try {
-        const poAttachment = await Attachment.findOneAndUpdate(
-            { PONumber },
-            { $push: { attachments: { $each: uploadResponses } } },
-            { new: true, upsert: true } // Create a new document if it doesn't exist
-        );
+          fs.unlinkSync(file.path);
+      }
 
-        res.status(200).json({
-            message: 'Files uploaded and saved successfully',
-            success: true,
-            data: uploadResponses,
-        });
-    } catch (error) {
-        console.error('Error saving file details to MongoDB:', error);
-        res.status(500).json({
-            message: 'An error occurred while saving file details',
-            success: false,
-            error: error.message,
-        });
-    }
+      const poAttachment = await Attachment.findOneAndUpdate(
+          { PONumber },
+          { $push: { attachments: { $each: uploadResponses } } },
+          { new: true, upsert: true, session }
+      );
+
+      await session.commitTransaction();
+      session.endSession();
+
+      res.status(200).json({
+          message: 'Files uploaded and saved successfully',
+          success: true,
+          data: uploadResponses,
+      });
+  } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+
+      console.error('Error saving file details to MongoDB:', error);
+      res.status(500).json({
+          message: 'An error occurred while saving file details',
+          success: false,
+          error: error.message,
+      });
+  }
 };
+
+
+
 
 const getAttachment = async (req, res) => {
-    const { PONumber } = req.params;
+  const { PONumber } = req.params;
 
-    try {
-        const PO = await PODetails.findOne({ _id: PONumber });
-        if (!PO) {
-            return res.status(404).json({ message: 'PO not found', success: false });
-        }
+  const session = await PODetails.startSession();
+  session.startTransaction();
 
-        const poAttachment = await Attachment.findOne({ PONumber });
-        if (!poAttachment) {
-            return res.status(200).json({
-                attachment: [],
-                message: 'No attachments found for the Purchase Order',
-                success: true,
-            });
-        }
+  try {
+      const PO = await PODetails.findOne({ _id: PONumber }).session(session);
+      if (!PO) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(404).json({ message: 'PO not found', success: false });
+      }
 
-        return res.status(200).json({
-            attachment: poAttachment.attachments.map((file) => ({
-                blobName: file.blobName,
-                url: file.url,
-                size: file.size,
-                uploadedBy: file.uploadedBy,
-                createdAt: file.createdAt,
-            })),
-            message: 'Fetched Successfully',
-            success: true,
-        });
-    } catch (error) {
-        console.error('Error fetching attachments:', error.message);
-        return res.status(500).json({ message: 'An error occurred', success: false });
-    }
+      const poAttachment = await Attachment.findOne({ PONumber }).session(session);
+      await session.commitTransaction();
+      session.endSession();
+
+      if (!poAttachment) {
+          return res.status(200).json({
+              attachment: [],
+              message: 'No attachments found for the Purchase Order',
+              success: true,
+          });
+      }
+
+      return res.status(200).json({
+          attachment: poAttachment.attachments.map((file) => ({
+              blobName: file.blobName,
+              url: file.url,
+              size: file.size,
+              uploadedBy: file.uploadedBy,
+              createdAt: file.createdAt,
+          })),
+          message: 'Fetched Successfully',
+          success: true,
+      });
+  } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+
+      console.error('Error fetching attachments:', error.message);
+      return res.status(500).json({ message: 'An error occurred', success: false });
+  }
 };
 
 
 
 
-const getLinks = async(req,res) => {
-  const {PONumber} = req.params;
-  
 
-  try{
-    //check PO
-    const PO = await PODetails.findOne({ _id: PONumber }); 
-    if (!PO) {
-      return res.status(404).json({ message: 'PO not found', success: false });
-    }
+const getLinks = async (req, res) => {
+  const { PONumber } = req.params;
 
-    //Attachment table 
-    const poAttachment = await Attachment.findOne({PONumber});
-    console.log(poAttachment)
-    if(!poAttachment){
+  const session = await PODetails.startSession();
+  session.startTransaction();
+
+  try {
+      const PO = await PODetails.findOne({ _id: PONumber }).session(session);
+      if (!PO) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(404).json({ message: 'PO not found', success: false });
+      }
+
+      const poAttachment = await Attachment.findOne({ PONumber }).session(session);
+      await session.commitTransaction();
+      session.endSession();
+
+      if (!poAttachment) {
+          return res.status(200).json({
+              link: [],
+              message: 'No Links Found for the Purchase Order',
+              success: true,
+          });
+      }
+
       return res.status(200).json({
-        link:[],
-        message:`No Links Found for the Purchase Order`,
-        success:true
-      })
-    }
+          link: poAttachment.links,
+          message: 'Fetched Successfully',
+          success: true,
+      });
+  } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
 
-    return res.status(200).json({
-      link:poAttachment.links,
-      message :'Fetched Successfully',
-      success:true
-    })
-  }
-  catch(error){
-    console.error("Error fetching Links:", error.message);
-    return res.status(500).json({ message: "An error occurred", success: false });
+      console.error('Error fetching Links:', error.message);
+      return res.status(500).json({ message: 'An error occurred', success: false });
   }
 };
 
 
 
 const uploadLinks = async (req, res) => {
-  const { PONumber } = req.params; // PO identifier from the request params
-  const { linkName, url } = req.body; // Link details from the request body
-  const {name} = req.authInfo;
+  const { PONumber } = req.params;
+  const { linkName, url } = req.body;
+  const { name } = req.authInfo;
+
+  const session = await PODetails.startSession();
+  session.startTransaction();
+
   try {
-    // Validate PO existence
-    const poDetails = await PODetails.findOne({ _id: PONumber});
-    if (!poDetails) {
-      return res.status(404).json({ message: "PO not found", success: false });
-    }
-
-    // Add or update links in the Attachment collection
-    const poAttachment = await Attachment.findOneAndUpdate(
-      { PONumber }, // Search by PONumber
-      {
-        $push: {
-          links: 
-            { 
-              linkName, 
-              url,
-              uploadedBy:name,
-              createdAt:new Date() 
-            }, // Add the new link
-        },
-      },
-      {
-        new: true, // Return the updated document
-        upsert: true, // Create a new document if it doesn't exist
+      const poDetails = await PODetails.findOne({ _id: PONumber }).session(session);
+      if (!poDetails) {
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(404).json({ message: 'PO not found', success: false });
       }
-    );
 
-    // Return success response
-    return res.status(200).json({
-      message: "Link uploaded and saved successfully",
-      success: true
-    });
+      await Attachment.findOneAndUpdate(
+          { PONumber },
+          {
+              $push: {
+                  links: {
+                      linkName,
+                      url,
+                      uploadedBy: name,
+                      createdAt: new Date(),
+                  },
+              },
+          },
+          { new: true, upsert: true, session }
+      );
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(200).json({
+          message: 'Link uploaded and saved successfully',
+          success: true,
+      });
   } catch (error) {
-    console.error("Error uploading links:", error.message);
-    return res.status(500).json({
-      message: "An error occurred during the link upload process",
-      success: false,
-      error: error.message,
-    });
+      await session.abortTransaction();
+      session.endSession();
+
+      console.error('Error uploading links:', error.message);
+      return res.status(500).json({
+          message: 'An error occurred during the link upload process',
+          success: false,
+          error: error.message,
+      });
   }
 };
 
