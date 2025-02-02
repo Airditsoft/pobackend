@@ -4,7 +4,7 @@ const { isAuthenticated ,isAdmin} = require("../Authentication/authentication");
 const { userRegister, getuserProfile } = require("../controller/usercontroller");
 const {getPOdetails,saveAllPOData,POdetail} = require("../controller/poController");
 const { handleApprovalOrRejection, getAnalytics, getPOComments, getApprovalHistory, addComments,showLogs} = require('../controller/approvalController');
-const {customApproval} = require("../controller/customcontroller");
+const {customApproval,getAllDepartments} = require("../controller/customcontroller");
 const {uploadMultipleFiles, getAttachment, getLinks, uploadLinks} = require('../controller/poattachment');
 const {upload} = require('../Middleware/multer')
 
@@ -21,6 +21,7 @@ globalRoutes.get('/getpo/:PONumberId',isAuthenticated,POdetail);
 globalRoutes.get("/savedetails",saveAllPOData);
 globalRoutes.post("/custom-approval/:PONumberId",isAuthenticated,customApproval);
 globalRoutes.get('/analytics',isAuthenticated,getAnalytics);
+globalRoutes.get('/departments',isAuthenticated,getAllDepartments);
 
 //approval or rejected ,history
 globalRoutes.put('/approval-rejection/:PONumberId', isAuthenticated, handleApprovalOrRejection);

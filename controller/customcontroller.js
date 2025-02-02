@@ -1,77 +1,384 @@
 const mongoose = require("mongoose");
 const CustomApproval = require("../models/customapproval");
+const User = require("../models/user");
 const customlevel = require("../ApprovalLevels/customLevels");
+const getLevels = require("../ApprovalLevels/getLevels");
 const POdetails = require("../models/podetails");
+const Department = require("../models/department");
+const {mail} = require("../utils/email");
+
+// const customApproval = async (req, res) => {
+//     const { action, approval } = req.body;
+//     const { PONumberId } = req.params;
+
+//     console.log("Received Request:", { action, approval, PONumberId });
+
+//     const session = await mongoose.startSession();
+//     session.startTransaction();
+
+//     try {
+//         const { level } = req.authInfo.department;
+
+//         // ✅ Ensure only Admins can perform this action
+//         if (level !== 0) {
+//             throw new Error("Admin Only Authorized");
+//         }
+
+//         // ✅ Find PO inside the transaction
+//         const PO = await POdetails.findOne({ _id: PONumberId }).session(session);
+//         if (!PO) {
+//             throw new Error("PO not found");
+//         }
+
+//         // ✅ Ensure Approval is not already set
+//         if (PO.approvaltype !== null || PO.currentapprovallevel !== null) {
+//             throw new Error("Approval already set or not allowed");
+//         }
+
+//         // ✅ Validate `action` type early
+//         if (!["custom", "default"].includes(action)) {
+//             throw new Error("Invalid action type");
+//         }
+
+//         let approvalLevels;
+
+//         if (action === "custom") {
+//             console.log("Setting custom approval...");
+
+//             // ✅ Batch Fetch All Departments in one Query
+//             const departmentTypes = approval.map((a) => a.type);
+//             const departmentMap = await Department.find({ type: { $in: departmentTypes } })
+//                 .select("_id type")
+//                 .lean();
+
+//             // ✅ Create a map of { type -> _id }
+//             const departmentIdMap = Object.fromEntries(
+//                 departmentMap.map((d) => [d.type, d._id])
+//             );
+
+//             console.log("Department Map:", departmentIdMap);
+
+//             // ✅ Construct approval body
+//             const approvalBody = approval.map(({ type, lastlevel }) => {
+//                 if (!departmentIdMap[type]) {
+//                     throw new Error(`Department '${type}' not found`);
+//                 }
+//                 return {
+//                     departmentId: departmentIdMap[type],
+//                     lastlevel
+//                 };
+//             });
+
+//             console.log("Final Approval Body:", JSON.stringify(approvalBody, null, 2));
+
+//             // ✅ Insert Custom Approval (Ensure transaction is passed)
+//             await CustomApproval.create([{ PONumber: PONumberId, approval: approvalBody }], { session });
+
+//             // ✅ Fetch approval levels
+//             approvalLevels = await customlevel(PONumberId);
+//             PO.approvaltype = 1; // Custom Approval
+
+//         } else {
+//             console.log("Setting default approval...");
+
+//             // ✅ Fetch default approval levels
+//             approvalLevels = await getLevels(PONumberId);
+//             PO.approvaltype = 0; // Default Approval
+//         }
+
+//         // ✅ Assign First Approval Level
+//         PO.currentapprovallevel = approvalLevels[0];
+
+//         // ✅ Save the PO Update in Transaction
+//         await PO.save({ session });
+
+//         // ✅ Commit the Transaction
+//         await session.commitTransaction();
+
+//         // ✅ Extract First Approval Level & Fetch User for Notification
+//         const [depId, lev] = approvalLevels[0].split(' ');
+
+//         const user = await User.findOne({
+//             'department.depId': depId,
+//             'department.level': lev
+//         }).lean();
+
+//         // ✅ Send Notification Email
+//         mail(user, PO); // Run asynchronously
+
+//         return res.status(200).json({
+//             message: `Approval set to ${action} successfully for PO`,
+//             success: true,
+//         });
+
+//     } catch (error) {
+//         await session.abortTransaction();
+//         console.error("Error during approval:", error.message);
+
+//         return res.status(500).json({
+//             message: error.message || "An error occurred during the approval process",
+//             success: false,
+//         });
+
+//     } finally {
+//         session.endSession();
+//     }
+// };
+
+
 
 const customApproval = async (req, res) => {
-    const { approval } = req.body;
+    const { action, approval } = req.body;
     const { PONumberId } = req.params;
 
+    console.log("Received Request:", { action, approval, PONumberId });
+
     const session = await mongoose.startSession();
-    session.startTransaction();
+    session.startTransaction(); // ✅ Start transaction
 
     try {
         const { level } = req.authInfo.department;
 
-        // Check if user is admin (only level 0 is authorized)
+        // ✅ Ensure only Admins can perform this action
         if (level !== 0) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(403).json({ message: "Admin Only Authorized", success: false });
+            throw new Error("Admin Only Authorized");
         }
 
-        // Find the PO by PONumber within the transaction
+        // ✅ Find PO inside the transaction
         const PO = await POdetails.findOne({ _id: PONumberId }).session(session);
         if (!PO) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(404).json({ message: "PO not found", success: false });
+            throw new Error("PO not found");
         }
 
-        // Check if Custom approval already set or not allowed
-        if (PO.approvaltype === 1 || PO.currentapprovallevel !== null) {
-            await session.abortTransaction();
-            session.endSession();
-            return res.status(400).json({
-                message: PO.approvaltype === 1 ? "Custom approval already set" : "Cannot set custom approval",
-                success: false,
+        // ✅ Ensure Approval is not already set
+        if (PO.approvaltype !== null || PO.currentapprovallevel !== null) {
+            throw new Error("Approval already set or not allowed");
+        }
+
+        // ✅ Validate `action` type early
+        if (!["custom", "default"].includes(action)) {
+            throw new Error("Invalid action type");
+        }
+
+        let approvalLevels;
+
+        if (action === "custom") {
+            console.log("Setting custom approval...");
+
+            // ✅ Fetch Department IDs for given types
+            const departmentTypes = approval.map((a) => a.type);
+            const departmentMap = await Department.find({ type: { $in: departmentTypes } })
+                .select("_id type")
+                .session(session); // ✅ Include session
+
+            // ✅ Create a map of { type -> _id }
+            const departmentIdMap = Object.fromEntries(
+                departmentMap.map((d) => [d.type, d._id])
+            );
+
+            console.log("Department Map:", departmentIdMap);
+
+            // ✅ Construct approval body
+            const approvalBody = approval.map(({ type, lastlevel }) => {
+                if (!departmentIdMap[type]) {
+                    throw new Error(`Department '${type}' not found`);
+                }
+                return {
+                    departmentId: departmentIdMap[type],
+                    lastlevel
+                };
             });
+
+            console.log("Final Approval Body:", JSON.stringify(approvalBody, null, 2));
+
+            // ✅ Insert Custom Approval with session
+            await CustomApproval.create([{ PONumber: PONumberId, approval: approvalBody }], { session });
+
+            // ✅ Fetch approval levels inside the session
+            approvalLevels = await customlevel(PONumberId, session);
+            PO.approvaltype = 1; // Custom Approval
+
+        } else {
+            console.log("Setting default approval...");
+
+            // ✅ Fetch default approval levels inside the session
+            approvalLevels = await getLevels(PONumberId, session);
+            PO.approvaltype = 0; // Default Approval
         }
 
-        console.log("Setting custom approval...");
-
-        // Create a custom approval record within the transaction
-        await CustomApproval.create([{ PONumber: PONumberId, approval }], { session });
-
-        // Get approval levels using custom logic
-        const approvalLevels = await customlevel(PONumberId);
-        console.log("Approval Levels:", approvalLevels);
-
-        // Set the first level in the PO's current approval level
+        // ✅ Assign First Approval Level
         PO.currentapprovallevel = approvalLevels[0];
-        PO.approvaltype = 1; // Mark approval as custom
+
+        // ✅ Save the PO Update in Transaction
         await PO.save({ session });
 
-        // Commit the transaction after all updates succeed
+        // ✅ Commit the Transaction
         await session.commitTransaction();
-        session.endSession();
+
+        // ✅ Extract First Approval Level & Fetch User for Notification
+        const [depId, lev] = approvalLevels[0].split(" ");
+
+        const user = await User.findOne({
+            "department.depId": depId,
+            "department.level": lev
+        }).session(session); // ✅ Include session
+
+        // ✅ Send Notification Email
+        mail(user, PO); // Run asynchronously
 
         return res.status(200).json({
-            message: "Custom approval created successfully for PO",
+            message: `Approval set to ${action} successfully for PO`,
             success: true,
         });
-    } catch (error) {
-        // Rollback transaction in case of any failure
-        await session.abortTransaction();
-        session.endSession();
 
-        console.error("Error during custom approval:", error);
+    } catch (error) {
+        await session.abortTransaction();
+        console.error("Error during approval:", error.message);
+
         return res.status(500).json({
-            message: "An error occurred during the custom approval process",
+            message: error.message || "An error occurred during the approval process",
             success: false,
-            error: error.message,
         });
+
+    } finally {
+        session.endSession(); // ✅ Ensure session always closes
     }
 };
 
-module.exports = { customApproval };
+
+
+
+
+// const customApproval = async (req, res) => {
+//     const { action, approval } = req.body;
+//     const { PONumberId } = req.params;
+
+//     console.log("Received Request:", { action, approval, PONumberId });
+
+//     try {
+//         const { level } = req.authInfo.department;
+
+//         // ✅ Ensure only Admins can perform this action
+//         if (level !== 0) {
+//             throw new Error("Admin Only Authorized");
+//         }
+
+//         // ✅ Find PO
+//         const PO = await POdetails.findOne({ _id: PONumberId });
+//         if (!PO) {
+//             throw new Error("PO not found");
+//         }
+
+//         // ✅ Ensure Approval is not already set
+//         if (PO.approvaltype !== null || PO.currentapprovallevel !== null) {
+//             throw new Error("Approval already set or not allowed");
+//         }
+
+//         // ✅ Validate `action` type early
+//         if (!["custom", "default"].includes(action)) {
+//             throw new Error("Invalid action type");
+//         }
+
+//         let approvalLevels;
+
+//         if (action === "custom") {
+//             console.log("Setting custom approval...");
+
+//             // ✅ Fetch Department IDs for given types
+//             const departmentTypes = approval.map((a) => a.type);
+//             const departmentMap = await Department.find({ type: { $in: departmentTypes } })
+//                 .select("_id type")
+//                 .lean();
+
+//             // ✅ Create a map of { type -> _id }
+//             const departmentIdMap = Object.fromEntries(
+//                 departmentMap.map((d) => [d.type, d._id])
+//             );
+
+//             console.log("Department Map:", departmentIdMap);
+
+//             // ✅ Construct approval body
+//             const approvalBody = approval.map(({ type, lastlevel }) => {
+//                 if (!departmentIdMap[type]) {
+//                     throw new Error(`Department '${type}' not found`);
+//                 }
+//                 return {
+//                     departmentId: departmentIdMap[type],
+//                     lastlevel
+//                 };
+//             });
+
+//             console.log("Final Approval Body:", JSON.stringify(approvalBody, null, 2));
+
+//             // ✅ Insert Custom Approval
+//             await CustomApproval.create([{ PONumber: PONumberId, approval: approvalBody }]);
+
+//             // ✅ Fetch approval levels
+//             approvalLevels = await customlevel(PONumberId);
+//             PO.approvaltype = 1; // Custom Approval
+
+//         } else {
+//             console.log("Setting default approval...");
+
+//             // ✅ Fetch default approval levels
+//             approvalLevels = await getLevels(PONumberId);
+//             PO.approvaltype = 0; // Default Approval
+//         }
+
+//         // ✅ Assign First Approval Level
+//         PO.currentapprovallevel = approvalLevels[0];
+
+//         // ✅ Save the PO Update
+//         await PO.save();
+
+//         // ✅ Extract First Approval Level & Fetch User for Notification
+//         const [depId, lev] = approvalLevels[0].split(' ');
+
+//         const user = await User.findOne({
+//             'department.depId': depId,
+//             'department.level': lev
+//         }).lean();
+
+//         // ✅ Send Notification Email
+//         mail(user, PO); // Run asynchronously
+
+//         return res.status(200).json({
+//             message: `Approval set to ${action} successfully for PO`,
+//             success: true,
+//         });
+
+//     } catch (error) {
+//         console.error("Error during approval:", error.message);
+
+//         return res.status(500).json({
+//             message: error.message || "An error occurred during the approval process",
+//             success: false,
+//         });
+//     }
+// };
+
+
+
+// ✅ Fetch All Departments API
+
+
+
+const getAllDepartments = async (req, res) => {
+  try {
+    const departments = await Department.find({ type: { $ne: "Admin" } }, "_id type lastlevel");
+
+    if (!departments || departments.length === 0) {
+      return res.status(404).json({ success: false, message: "No departments found" });
+    }
+
+    return res.status(200).json({ success: true, data: departments });
+  } catch (error) {
+    console.error("Error fetching departments:", error);
+    return res.status(500).json({ success: false, message: "Server Error" });
+  }
+};
+
+
+
+
+module.exports = { customApproval ,getAllDepartments};

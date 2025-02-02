@@ -11,6 +11,7 @@ const {approvalSchema} = require('../validation/validator');
 const getLevels = require('../ApprovalLevels/getLevels');
 const CustomLevels = require('../ApprovalLevels/customLevels');
 const Attachment = require('../models/attachment');
+const {mail} = require('../utils/email');
 
 
 
@@ -285,7 +286,9 @@ const handleApprovalOrRejection = async (req, res) => {
       createdAt: new Date(),
     };
 
+   
     // Handle "approve" action
+    let userNotification;
     if (action === "approve") {
       if (approvalLevels.indexOf(app_level) === approvalLevels.length - 1) {
         PO.ApprovalStatus = approvedStatus.key;
@@ -293,8 +296,11 @@ const handleApprovalOrRejection = async (req, res) => {
       } else {
         const nextLevel = approvalLevels[approvalLevels.indexOf(app_level) + 1];
         PO.currentapprovallevel = nextLevel;
+        console.log('NextLevel:', nextLevel);
+        userNotification=nextLevel;
       }
       await PO.save({ session });
+
     }
 
     // Handle "reject" action
@@ -305,8 +311,12 @@ const handleApprovalOrRejection = async (req, res) => {
       } else {
         const prevLevel = approvalLevels[approvalLevels.indexOf(app_level) - 1];
         PO.currentapprovallevel = prevLevel;
+        console.log('PrevLevel:', prevLevel);
+        userNotification=prevLevel;
+        
       }
       await PO.save({ session });
+    
     }
 
     // Check if the PO exists in the Approval table
@@ -329,6 +339,20 @@ const handleApprovalOrRejection = async (req, res) => {
     }
 
     // ✅ Commit the transaction (Save all changes)
+ 
+    console.log('UserNotification:', userNotification);
+
+    const [depId, lev] = userNotification.split(' ');
+    console.log('DepId:', depId);
+    console.log('Level:', lev); 
+    const user = await User.findOne({
+                    'department.depId': depId,
+                    'department.level':lev
+                });
+                console.log('User:', user);
+
+    mail(user,PO);//runasynchronously   
+    
     await session.commitTransaction();
     session.endSession();
 

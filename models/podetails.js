@@ -54,12 +54,17 @@ const PODetailsSchema = new mongoose.Schema({
   approvaltype: {
     type: Number,
     enum: [0, 1], // o only 'default' or 1 'custom'
-    default: 0, // If not provided, default will be 'default'
+    default: null, // If not provided, default will be 'default'
   },
   Read:{
     type:Number,
     enum:[0,1],
     default:0
+  },
+  priority:{
+    type:String,
+    required:true,
+    default:'High'
   },
   currentapprovallevel:{
     type:String,

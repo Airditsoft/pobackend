@@ -10,6 +10,7 @@ const { parseODataDate } = require('../utils/parseddata');
 const User = require('../models/user');
 const Department = require('../models/department');
 const Status = require('../models/status');
+const { isAdmin } = require('../Authentication/authentication');
 
 
 
@@ -233,35 +234,16 @@ const saveAllPOData = async (req, res) => {
 //   }
 // };
 
-
 const getPOdetails = async (req, res) => {
   try {
     const { depId, level } = req.authInfo.department;
     const appLevel = `${depId} ${level}`;
-    const { filter } = req.query; // Get filter from query params
-
+    const { filter, sortBy } = req.query; // Get filter & sort options from query params
+    console.log(filter,sortBy)
     // Fetch the pending status key from the Status collection
     const pendingStatus = await Status.findOne({ key: 201 }, '-_id key').lean();
     if (!pendingStatus) {
       return res.status(400).json({ message: 'Pending status not configured', success: false });
-    }
-
-    // Fetch the first approval level's department
-    const department = await Department.findOne({ 'department.level': { $ne: 0 } }).sort().lean();
-    if (!department) {
-      return res.status(404).json({ message: 'No departments found for approval', success: false });
-    }
-
-    // Fetch users for the first approval level
-    const user = await User.findOne({
-      'department.depId': department._id,
-      'department.level': { $ne: 0 } // Exclude level 0
-    })
-      .sort({ 'department.level': 1 }) // Sort by level ascending
-      .lean();
-
-    if (!user) {
-      return res.status(404).json({ message: 'No user found for approval', success: false });
     }
 
     // Build filter condition for Read status
@@ -272,35 +254,64 @@ const getPOdetails = async (req, res) => {
       readFilter = { Read: 1 };
     }
 
-    // Fetch POs based on approval level + Read filter
-    let poDetails;
-    const firstApprovalLevel = `${user.department.depId} ${user.department.level}`;
+    let poDetails = [];
 
-    if (appLevel === firstApprovalLevel) {
+    
+
+    if (sortBy === "priority") {
+      // ✅ Sorting by Priority using Aggregation
+      poDetails = await PODetails.aggregate([
+        {
+          $match: {
+            currentapprovallevel: { $ne: null },
+            currentapprovallevel: appLevel,
+            approvaltype: { $ne: null },
+            ApprovalStatus: pendingStatus.key,
+            ...readFilter
+          }
+        },
+        {
+          $addFields: {
+            priorityValue: {
+              $switch: {
+                branches: [
+                  { case: { $eq: ["$priority", "High"] }, then: 3 },
+                  { case: { $eq: ["$priority", "Medium"] }, then: 2 },
+                  { case: { $eq: ["$priority", "Low"] }, then: 1 }
+                ],
+                default: 0
+              }
+            }
+          }
+        },
+        { $sort: { priorityValue: -1 } }, // Sort High → Medium → Low
+        { $project: { priorityValue: 0 } } // Remove extra field from output
+      ]);
+    } else if (sortBy === "date") {
+      // ✅ Sorting by Date (Newest First)
       poDetails = await PODetails.find({
-        $or: [
-          { currentapprovallevel: null },
-          { currentapprovallevel: firstApprovalLevel }
-        ],
-        ApprovalStatus: pendingStatus.key,  // Check against the pending status key
-        ...readFilter // Apply Read filter condition
-      }, '-currentapprovallevel -__v').lean();
-    } else {
-      poDetails = await PODetails.find({
-        currentapprovallevel: appLevel,
-        ApprovalStatus: pendingStatus.key, // Check against the pending status key
-        ...readFilter // Apply Read filter condition
-      }, '-currentapprovallevel -__v').lean();
+        $and: [
+          { currentapprovallevel: { $ne: null } },
+          { currentapprovallevel: appLevel },
+          { approvaltype: { $ne: null } },
+          { ApprovalStatus: pendingStatus.key },
+          { ...readFilter }
+        ]
+      })
+      .sort({ CreatedOn: -1 }) // Sort Newest First
+      .lean();
     }
 
     if (!poDetails || poDetails.length === 0) {
-      return res.status(404).json({
-        message: `No POs found for approval by ${req.authInfo.name}`,
+      return res.status(200).json({
+        poWithItems:[],
+        poDetailsCount: 0,
+        isAdmin: false,
         success: false,
       });
     }
 
-    // Fetch associated items for each PO and calculate item counts
+    // Fetch associated items for each PO
     const poWithItems = await Promise.all(
       poDetails.map(async (po) => {
         const items = await POItem.find({ PONumber: po._id }, '-PONumber -__v').lean();
@@ -308,15 +319,11 @@ const getPOdetails = async (req, res) => {
       })
     );
 
-    // Update the 'Read' field of the first PO in the list (only if it's unread)
-    if (poWithItems.length > 0 && poWithItems[0].Read === 0) {
-      await PODetails.updateOne({ _id: poWithItems[0]._id }, { $set: { Read: 1 } });
-    }
-
     return res.status(200).json({
       data: {
-        poDetailsCount: poDetails.length, // Total number of POs
-        poWithItems,                     // Details of POs with items
+        poDetailsCount: poDetails.length,
+        poWithItems,
+        isAdmin:false,
       },
       success: true,
     });
@@ -325,6 +332,8 @@ const getPOdetails = async (req, res) => {
     return res.status(500).json({ message: 'An error occurred', success: false });
   }
 };
+
+
 
 
 
