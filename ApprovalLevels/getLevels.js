@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const User = require('../models/user'); // Assuming User model is imported
-const POItem = require('../models/poitems');
+const POItem = require('../models/formitems');
 const Department = require('../models/department') // Assuming POItem model is imported
 
 // Threshold values
@@ -111,6 +111,6 @@ const getLevels = async (PONumber) => {
   return levelsToInclude;
 };
 
-module.exports = getLevels;
+module.exports = {getLevels,getAllApprovalLevelsWithDepartments};
 
 

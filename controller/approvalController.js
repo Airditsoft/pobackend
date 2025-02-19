@@ -1,23 +1,26 @@
 const fs = require('fs');
 const path = require('path');
 const mongoose = require("mongoose");
-const PODetails = require('../models/podetails');
+const PODetails = require('../models/formdetails');
 const logger = require('../logger/logger');
 const User = require('../models/user');
 const Approval = require('../models/approval');
-const POItem = require('../models/poitems');
+const POItem = require('../models/formitems');
 const Status = require('../models/status');
 const {approvalSchema} = require('../validation/validator');
-const getLevels = require('../ApprovalLevels/getLevels');
+const {getLevels} = require('../ApprovalLevels/getLevels');
 const CustomLevels = require('../ApprovalLevels/customLevels');
 const Attachment = require('../models/attachment');
 const {mail} = require('../utils/email');
+const ApprovalHierarchy = require('../models/approvalhierarchy');
+const approvalhierarchy = require('../models/approvalhierarchy');
 
 
 
 
 const showLogs = async (req, res) => {
   const { PONumberId } = req.params;
+  console.log('came .........')
 
   try {
     const PO = await PODetails.findOne({ _id: PONumberId });
@@ -26,13 +29,18 @@ const showLogs = async (req, res) => {
       return res.status(404).json({ message: `PO not found`, success: false });
     }
 
-    // Fetch the Approval Levels
-    let approvalLevels;
-    if (PO.approvaltype === 0) {
-      approvalLevels = await getLevels(PONumberId);
-    } else {
-      approvalLevels = await CustomLevels(PONumberId);
-    } 
+    // // Fetch the Approval Levels
+    // let approvalLevels;
+    // if (PO.approvaltype === 0) {
+    //   approvalLevels = await getLevels(PONumberId);
+    // } else {
+    //   approvalLevels = await CustomLevels(PONumberId);
+    // } 
+
+    const appr = await ApprovalHierarchy.findOne({ PONumber: PONumberId })
+                              .select('approval_hierarchy')
+                              
+    const approvalLevels = appr.approval_hierarchy;
 
     console.log('Approval Levels:', approvalLevels);
 
@@ -218,6 +226,18 @@ const handleApprovalOrRejection = async (req, res) => {
       return res.status(404).json({ message: "PO not found", success: false });
     }
 
+    const appr = await ApprovalHierarchy.findOne({ PONumber: PONumberId })
+                              .select('approval_hierarchy')
+                              .session(session);
+
+                  let approvalLevels =appr.approval_hierarchy;
+
+    if(!approvalLevels){
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ message: "ApprovalHierarchy not found", success: false });
+    }
+
     // Update the 'Read' field to 1 inside the transaction
     await PODetails.updateOne({ _id: PONumberId }, { $set: { Read: 0 } }).session(session);
 
@@ -249,16 +269,36 @@ const handleApprovalOrRejection = async (req, res) => {
       });
     }
 
-    let approvalLevels;
-    if (PO.approvaltype === 0) {
-      approvalLevels = await getLevels(PONumberId);
-    } else {
-      approvalLevels = await CustomLevels(PONumberId);
-    }
+    // let approvalLevels;
+    // if (PO.approvaltype === 0) {
+    //   approvalLevels = await getLevels(PONumberId);
+    // } else {
+    //   approvalLevels = await CustomLevels(PONumberId);
+    // }
 
-    // Check if the user has sufficient approval level
-    if (PO.currentapprovallevel === null) {
-      if (approvalLevels[0] !== app_level) {
+    // // Check if the user has sufficient approval level
+    // if (PO.currentapprovallevel === null) {
+    //   if (approvalLevels[0] !== app_level) {
+    //     await session.abortTransaction();
+    //     session.endSession();
+    //     return res.status(400).json({
+    //       message: `Approval failed by ${req.authInfo.name} due to insufficient approval level`,
+    //       success: false,
+    //     });
+    //   }
+    // } else {
+    //   if (PO.currentapprovallevel !== app_level) {
+    //     await session.abortTransaction();
+    //     session.endSession();
+    //     return res.status(400).json({
+    //       message: `Approval failed by ${req.authInfo.name} due to insufficient approval level`,
+    //       success: false,
+    //     });
+    //   }
+    // }
+
+      //check the approval level correctly matched or not .
+        if (PO.currentapprovallevel !== app_level) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({
@@ -266,16 +306,6 @@ const handleApprovalOrRejection = async (req, res) => {
           success: false,
         });
       }
-    } else {
-      if (PO.currentapprovallevel !== app_level) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          message: `Approval failed by ${req.authInfo.name} due to insufficient approval level`,
-          success: false,
-        });
-      }
-    }
 
     // Update data for approval hierarchy
     const approvalEntry = {
@@ -342,7 +372,7 @@ const handleApprovalOrRejection = async (req, res) => {
  
     console.log('UserNotification:', userNotification);
 
-    const [depId, lev] = userNotification.split(' ');
+ if(userNotification){   const [depId, lev] = userNotification.split(' ');
     console.log('DepId:', depId);
     console.log('Level:', lev); 
     const user = await User.findOne({
@@ -351,7 +381,9 @@ const handleApprovalOrRejection = async (req, res) => {
                 });
                 console.log('User:', user);
 
-    mail(user,PO);//runasynchronously   
+    mail(user,PO);//runasynchronously
+    
+  }  
     
     await session.commitTransaction();
     session.endSession();

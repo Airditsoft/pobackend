@@ -1,8 +1,8 @@
 
-const PODetails = require('../models/podetails');
+const PODetails = require('../models/formdetails');
 const User = require('../models/user');
 const Status = require('../models/status');
-const POItem = require('../models/poitems');
+const POItem = require('../models/formitems');
 
 
 const  isAuthenticated = async(req, res, next) =>{

@@ -3,7 +3,8 @@ const Schema = mongoose.Schema;
 
 
 const poItemSchema = new mongoose.Schema({
-  PONumber: {  type: Schema.Types.ObjectId,required: true,ref: "Podetails"},
+   formId: { type: mongoose.Schema.Types.ObjectId, ref: "Form" },
+  PONumber: {  type: Schema.Types.ObjectId,required: true,ref: "FormDetails"},
   LineItemNo: { type: String, required: true },
   RequestorName: { type: String, default: '' },
   MaterialNum: { type: String, required: false },
@@ -18,4 +19,4 @@ const poItemSchema = new mongoose.Schema({
   TaxCode: { type: String, default: '' },
 });
 
-module.exports = mongoose.model('POItem', poItemSchema);
+module.exports = mongoose.model('FormItem', poItemSchema);

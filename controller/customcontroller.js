@@ -3,7 +3,7 @@ const CustomApproval = require("../models/customapproval");
 const User = require("../models/user");
 const customlevel = require("../ApprovalLevels/customLevels");
 const getLevels = require("../ApprovalLevels/getLevels");
-const POdetails = require("../models/podetails");
+const FormDetails = require("../models/formdetails");
 const Department = require("../models/department");
 const {mail} = require("../utils/email");
 
@@ -371,7 +371,7 @@ const getAllDepartments = async (req, res) => {
       return res.status(404).json({ success: false, message: "No departments found" });
     }
 
-    return res.status(200).json({ success: true, data: departments });
+    return res.status(200).json({ success: true,  departments });
   } catch (error) {
     console.error("Error fetching departments:", error);
     return res.status(500).json({ success: false, message: "Server Error" });

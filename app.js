@@ -16,7 +16,12 @@ const app = express();
 
 // Middlewares
 app.use(morgan("dev"));
-app.use(cors());
+// Allow requests from all origins
+app.use(cors({ origin: '*' }));
+
+app.get('/', (req, res) => {
+    res.send('CORS enabled for all origins');
+});
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -32,6 +37,9 @@ app.post("/dep", async (req, res) => {
 //jane.smith@example.com-3
 //robert.brown@example.com-4
 //emily.davis@example.com-5
+
+
+//krpvnpvn@gmail.com
 
 // Middleware for manual user check
 app.use(

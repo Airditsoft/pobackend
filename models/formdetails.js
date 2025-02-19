@@ -2,6 +2,10 @@ const { required } = require("joi");
 const mongoose = require("mongoose");
 
 const PODetailsSchema = new mongoose.Schema({
+  formId: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: "Form" 
+  }, // New field
   PONumber: {
     type: String,
     required: true,
@@ -51,11 +55,6 @@ const PODetailsSchema = new mongoose.Schema({
   PaymentTerms: {
     type: String,
   },
-  approvaltype: {
-    type: Number,
-    enum: [0, 1], // o only 'default' or 1 'custom'
-    default: null, // If not provided, default will be 'default'
-  },
   Read:{
     type:Number,
     enum:[0,1],
@@ -72,4 +71,4 @@ const PODetailsSchema = new mongoose.Schema({
   }
 });
 
-module.exports = mongoose.model("Podetails", PODetailsSchema);
+module.exports = mongoose.model("FormDetails", PODetailsSchema);

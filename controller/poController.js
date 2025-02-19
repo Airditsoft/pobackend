@@ -4,13 +4,17 @@ const https = require('https');
 const mongoose = require("mongoose");
 
 // Imports
-const PODetails = require('../models/podetails');
-const POItem = require('../models/poitems');
+const Form = require('../models/form');
+const FormDetails = require('../models/formdetails');
+const FormItem = require('../models/formitems');
 const { parseODataDate } = require('../utils/parseddata');
 const User = require('../models/user');
 const Department = require('../models/department');
 const Status = require('../models/status');
+const ApprovalHierarchy = require('../models/approvalhierarchy');
+const {approvallevels} = require('../ApprovalLevels/approvalhierarchy')
 const { isAdmin } = require('../Authentication/authentication');
+const {checkRulesAndSetHierarchy} = require('../utils/checkRulesAndSetHierarchy')
 
 
 
@@ -24,103 +28,93 @@ const SAP_PASSWORD = process.env.SAP_PASSWORD;
 const authorization = 'Basic ' + Buffer.from(`${SAP_USERNAME}:${SAP_PASSWORD}`).toString('base64');
 
 
-// Function to save all PO data (PO Details & PO Items)
-const saveAllPOData = async (req, res) => {
-  try {
-    const httpsAgent = new https.Agent({
-      rejectUnauthorized: false,
-    });
+// // Function to save all PO data (PO Details & PO Items)
+// const saveAllPOData = async (req, res) => {
+//   try {
+//     const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
-    // Fetch data from the `PO Details` API
-    const poDetailsResponse = await axios.get(SAP_API_BASE_URL_PO, {
-      headers: {
-        Authorization: authorization,
-      },
-      httpsAgent,
-    });
+//     // Fetch data from SAP API
+//     const poDetailsResponse = await axios.get(SAP_API_BASE_URL_PO, { headers: { Authorization: authorization }, httpsAgent });
+//     const poItemResponse = await axios.get(SAP_API_BASE_URL_POITEM, { headers: { Authorization: authorization }, httpsAgent });
 
-    // Fetch data from the `PO Item` API
-    const poItemResponse = await axios.get(SAP_API_BASE_URL_POITEM, {
-      headers: {
-        Authorization: authorization,
-      },
-      httpsAgent,
-    });
+//     if (!poDetailsResponse.data || !poItemResponse.data) {
+//       return res.status(400).json({ message: "No PO Data found" });
+//     }
 
-    // Check if both responses contain data
-    if (!poDetailsResponse.data || !poItemResponse.data) {
-      return res.status(400).json({ message: 'No PO Data found' });
-    }
+//     // Transform `PO Details` data
+//     const poDetails = poDetailsResponse.data.d.results.map((item) => ({
+//       ...item,
+//       CreatedOn: parseODataDate(item.CreatedOn),
+//       Read: 0,
+//       ApprovalStatus: item.Approval === "Pending" ? 201 : 202,
+//     }));
 
-    // Transform `PO Details` data
-    const poDetails = poDetailsResponse.data.d.results.map((item) => {
-      const { __metadata, to_items, CreatedOn,Approval, ...filteredItem } = item;
-      return {
-        ...filteredItem,
-        CreatedOn: parseODataDate(CreatedOn),
-        Read:0,
-        ApprovalStatus: Approval === 'Pending' ? 201 : 202// Convert OData date format
-      };
-    });
+//     // Transform `PO Items` data
+//     const poItems = poItemResponse.data.d.results.map((item) => ({
+//       ...item,
+//       DeliveryDate: item.DeliveryDate ? parseODataDate(item.DeliveryDate) : null,
+//     }));
 
-    // Transform `PO Items` data
-    const poItems = poItemResponse.data.d.results.map((item) => {
-      const { __metadata, to_POHeader, DeliveryDate, ...filteredItem } = item;
-      return {
-        ...filteredItem,
-        DeliveryDate: DeliveryDate ? parseODataDate(DeliveryDate) : null, // Set to null if DeliveryDate is missing or null
-      };
-    });
+//     // Fetch existing POs to avoid duplication
+//     const existingPODetails = await PODetails.find(
+//       { PONumber: { $in: poDetails.map((item) => item.PONumber) } },
+//       { PONumber: 1 }
+//     ).lean();
 
-    // Save `PO Details` to MongoDB and get the inserted documents' ObjectIds
-    const existingPODetails = await PODetails.find(
-      { PONumber: { $in: poDetails.map((item) => item.PONumber) } },
-      { PONumber: 1 }
-    ).lean();
-    const existingPODetailsNumbers = new Set(existingPODetails.map((record) => record.PONumber));
-    const newPODetails = poDetails.filter((item) => !existingPODetailsNumbers.has(item.PONumber));
+//     const existingPONumbers = new Set(existingPODetails.map((record) => record.PONumber));
 
-    let insertedPODetails = [];
-    if (newPODetails.length > 0) {
-      insertedPODetails = await PODetails.insertMany(newPODetails);
-    }
+//     // Filter new POs (those not in DB)
+//     const newPODetails = poDetails.filter((item) => !existingPONumbers.has(item.PONumber));
 
-    // Now we need to map the PONumber in POItems to the ObjectId from PODetails
-    const poItemsWithObjectId = poItems.map((item) => {
-      // Find the corresponding ObjectId for the PONumber
-      const podetail = insertedPODetails.find((podetail) => podetail.PONumber === item.PONumber);
-      if (podetail) {
-        item.PONumber = podetail._id; // Set the PONumber as ObjectId
-      } else {
-        // If not found, log and skip or handle as needed
-        console.error(`No PODetail found for PONumber: ${item.PONumber}`);
-      }
-      return item;
-    });
+//     let insertedPODetails = [];
+//     if (newPODetails.length > 0) {
+//       insertedPODetails = await PODetails.insertMany(newPODetails);
+//     }
 
-    // Save `PO Items` to MongoDB
-    const existingPOItems = await POItem.find(
-      { PONumber: { $in: poItemsWithObjectId.map((item) => item.PONumber) } },
-      { PONumber: 1 }
-    ).lean();
-    const existingPOItemNumbers = new Set(existingPOItems.map((record) => record.PONumber));
-    const newPOItems = poItemsWithObjectId.filter((item) => !existingPOItemNumbers.has(item.PONumber));
+//     // Map PO Items to their respective PO ObjectId
+//     const poItemsWithObjectId = poItems.map((item) => {
+//       const podetail = insertedPODetails.find((podetail) => podetail.PONumber === item.PONumber);
+//       if (podetail) {
+//         item.PONumber = podetail._id;
+//       }
+//       return item;
+//     });
 
-    if (newPOItems.length > 0) {
-      await POItem.insertMany(newPOItems);
-    }
+//     // Fetch existing PO Items to avoid duplication
+//     const existingPOItems = await POItem.find(
+//       { PONumber: { $in: poItemsWithObjectId.map((item) => item.PONumber) } },
+//       { PONumber: 1 }
+//     ).lean();
 
-    // Send response
-    return res.status(200).json({
-      message: 'PO Details and PO Items fetched and saved successfully',
-      savedPODetailsCount: newPODetails.length,
-      savedPOItemsCount: newPOItems.length,
-    });
-  } catch (error) {
-    console.error('Error saving PO Data:', error.message);
-    res.status(500).json({ message: error.message });
-  }
-};
+//     const existingPOItemNumbers = new Set(existingPOItems.map((record) => record.PONumber));
+
+//     // Filter new PO Items
+//     const newPOItems = poItemsWithObjectId.filter((item) => !existingPOItemNumbers.has(item.PONumber));
+
+//     if (newPOItems.length > 0) {
+//       await POItem.insertMany(newPOItems);
+//     }
+
+//     // // 🟢 Apply approval levels dynamically for each PO
+//     // for (let po of insertedPODetails) {
+//     //   const existingApproval = await ApprovalHierarchy.findOne({ PONumber: po._id });
+     
+//     //   if (!existingApproval) {
+//     //     await approvallevels(po._id);
+//     //   }
+//     // }
+
+//     return res.status(200).json({
+//       message: "POs saved and updated with approval levels",
+//       savedPODetailsCount: newPODetails.length,
+//       savedPOItemsCount: newPOItems.length,
+//     });
+//   } catch (error) {
+//     console.error("Error saving PO Data:", error.message);
+//     res.status(500).json({ message: error.message });
+//   }
+// };
+
 
 // const getPOdetails = async (req, res) => {
 //   try {
@@ -234,6 +228,326 @@ const saveAllPOData = async (req, res) => {
 //   }
 // };
 
+// const saveAllPOData = async (req, res) => {
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
+
+//   try {
+//     const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+//     // ✅ Step 1: Fetch data from SAP API
+//     const [poDetailsResponse, poItemResponse] = await Promise.all([
+//       axios.get(SAP_API_BASE_URL_PO, { headers: { Authorization: authorization }, httpsAgent }),
+//       axios.get(SAP_API_BASE_URL_POITEM, { headers: { Authorization: authorization }, httpsAgent })
+//     ]);
+//     console.log('came1')
+
+//     if (!poDetailsResponse.data || !poItemResponse.data) {
+//       return res.status(400).json({ message: "No PO Data found" });
+//     }
+//     console.log('came2')
+//     // ✅ Step 2: Check if a Form with type "PO" exists, if not create one
+//     let existingForm = await Form.findOne({ type: "po" }).session(session);
+//     if (!existingForm) {
+//       existingForm = (await Form.create([{ type: "po" }], { session }))[0];
+//     }
+//     console.log('came3')
+//     // ✅ Step 3: Transform PO Details & Items
+//     const poDetails = poDetailsResponse.data.d.results.map((item) => ({
+//       formId: existingForm._id,
+//       ...item,
+//       CreatedOn: parseODataDate(item.CreatedOn),
+//       Read: 0,
+//       ApprovalStatus: item.Approval === "Pending" ? 201 : 202,
+//     }));
+//     console.log('came3')
+//     const poItems = poItemResponse.data.d.results.map((item) => ({
+//       formId: existingForm._id,
+//       ...item,
+//       DeliveryDate: item.DeliveryDate ? parseODataDate(item.DeliveryDate) : null,
+//     }));
+//     console.log('came4')
+//     // ✅ Step 4: Fetch existing PO & PO Items in one query per collection
+//     const [existingPODetails, existingPOItems] = await Promise.all([
+//       FormDetails.find({ PONumber: { $in: poDetails.map(item => item.PONumber) } }, { PONumber: 1 })
+//         .session(session).lean(),
+//       FormItem.find({ PONumber: { $in: poItems.map(item => item.PONumber) } }, { PONumber: 1 })
+//         .session(session).lean()
+//     ]);
+
+//     const existingPONumbers = new Set(existingPODetails.map(record => record.PONumber));
+//     const existingPOItemNumbers = new Set(existingPOItems.map(record => record.PONumber));
+//     console.log('came5')
+//     // ✅ Step 5: Filter & Save New PO Details
+//     const newPODetails = poDetails.filter(item => !existingPONumbers.has(item.PONumber));
+//     let insertedPODetails = [];
+//     if (newPODetails.length > 0) {
+//       insertedPODetails = await FormDetails.insertMany(newPODetails, { session });
+//     }
+//     console.log('came6')
+//     // ✅ Step 6: Create a Map for Quick PONumber to ObjectId Mapping
+//     const poDetailsMap = new Map(insertedPODetails.map(po => [po.PONumber, po._id]));
+
+//     // ✅ Step 7: Filter & Save New PO Items (with correct PO ObjectId)
+//     const newPOItems = poItems
+//       .filter(item => !existingPOItemNumbers.has(item.PONumber))
+//       .map(item => ({ ...item, PONumber: poDetailsMap.get(item.PONumber) }));
+
+//     if (newPOItems.length > 0) {
+//       await FormItem.insertMany(newPOItems, { session });
+//     }
+//     console.log('came7')
+//     // ✅ Step 8: Bulk Check Global Rules & Set Approval Hierarchy for New POs
+//     if (insertedPODetails.length > 0) {
+//       await Promise.all(insertedPODetails.map(po => checkRulesAndSetHierarchy(po._id, session)));
+//     }
+
+//     await session.commitTransaction();
+//     session.endSession();
+//     console.log('came8')
+//     return res.status(200).json({
+//       message: "POs saved successfully and linked to Form",
+//       savedPODetailsCount: newPODetails.length,
+//       savedPOItemsCount: newPOItems.length,
+//     });
+
+//   } catch (error) {
+//     await session.abortTransaction();
+//     session.endSession();
+//     console.error("Error saving PO Data:", error.message);
+//     res.status(500).json({ message: error.message });
+//   }
+// };
+
+
+
+const saveAllPOData = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+    // ✅ Step 1: Fetch data from SAP API
+    const [poDetailsResponse, poItemResponse] = await Promise.all([
+      axios.get(SAP_API_BASE_URL_PO, { headers: { Authorization: authorization }, httpsAgent }),
+      axios.get(SAP_API_BASE_URL_POITEM, { headers: { Authorization: authorization }, httpsAgent }),
+    ]);
+
+    if (!poDetailsResponse.data || !poItemResponse.data) {
+      return res.status(400).json({ message: "No PO Data found" });
+    }
+
+    // ✅ Step 2: Check if a Form with type "PO" exists, if not create one
+    let existingForm = await Form.findOne({ type: "po" }).session(session);
+    if (!existingForm) {
+      existingForm = await Form.create([{ type: "po" }], { session });
+    }
+
+    // ✅ Step 3: Transform `PO Details` data and attach formId
+    const poDetails = poDetailsResponse.data.d.results.map((item) => ({
+      formId: existingForm._id,
+      ...item,
+      CreatedOn: parseODataDate(item.CreatedOn), // Convert date format
+      Read: 0,
+      ApprovalStatus: item.Approval === "Pending" ? 201 : 202,
+    }));
+
+    // ✅ Step 4: Transform `PO Items` data
+    const poItems = poItemResponse.data.d.results.map((item) => ({
+      formId: existingForm._id,
+      ...item,
+      DeliveryDate: item.DeliveryDate ? parseODataDate(item.DeliveryDate) : null,
+    }));
+
+    // ✅ Step 5: Fetch existing POs to avoid duplication
+    const existingPODetails = await FormDetails.find(
+      { PONumber: { $in: poDetails.map((item) => item.PONumber) } },
+      { PONumber: 1 }
+    )
+      .session(session)
+      .lean();
+
+    const existingPONumbers = new Set(existingPODetails.map((record) => record.PONumber));
+
+    // ✅ Step 6: Filter new POs (those not in DB) and save
+    const newPODetails = poDetails.filter((item) => !existingPONumbers.has(item.PONumber));
+    let insertedPODetails = [];
+    if (newPODetails.length > 0) {
+      insertedPODetails = await FormDetails.insertMany(newPODetails, { session });
+    }
+
+
+if(insertedPODetails.length === 0){
+  await session.commitTransaction();
+  session.endSession();
+
+  return res.status(200).json({
+    message: "NO New  Po Found",
+    savedPODetailsCount: 0,
+    savedPOItemsCount: 0,
+  });
+}
+// {in this part error came bz if no inserted o s i gave doubt is whether they will send any items after that samepo we need to do }
+    // ✅ Step 7: Map PO Items to their respective PO ObjectId-
+    const poItemsWithObjectId = poItems.map((item) => {
+      const podetail = insertedPODetails.find((detail) => detail.PONumber === item.PONumber);
+      
+  if (podetail) {
+    item.PONumber = podetail._id;  // Correctly setting ObjectId
+  }
+      return item;
+    });
+
+
+
+
+    // ✅ Step 8: Fetch existing PO Items to avoid duplication
+    const existingPOItems = await FormItem.find(
+      { PONumber: { $in: poItemsWithObjectId.map((item) => item.PONumber) } },
+      { PONumber: 1 }
+    )
+      .session(session)
+      .lean();
+
+    const existingPOItemNumbers = new Set(existingPOItems.map((record) => record.PONumber));
+  
+    // ✅ Step 9: Filter new PO Items and save
+    const newPOItems = poItemsWithObjectId.filter((item) => !existingPOItemNumbers.has(item.PONumber));
+    if (newPOItems.length > 0) {
+      await FormItem.insertMany(newPOItems, { session });
+    }
+
+    // // ✅ Step 10: Check Global Rules AFTER saving POs and Items
+    // const allPODetailsToCheck = insertedPODetails.length > 0 ? insertedPODetails : existingPODetails;
+
+    
+    for (const po of insertedPODetails) {
+      await checkRulesAndSetHierarchy(po._id, session);
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      message: "POs saved successfully and linked to Form",
+      savedPODetailsCount: newPODetails.length,
+      savedPOItemsCount: newPOItems.length,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Error saving PO Data:", error.message);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+
+
+// const saveAllPOData = async (req, res) => {
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
+
+//   try {
+//     const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+//     // Fetch data from SAP API
+//     const poDetailsResponse = await axios.get(SAP_API_BASE_URL_PO, { headers: { Authorization: authorization }, httpsAgent });
+//     const poItemResponse = await axios.get(SAP_API_BASE_URL_POITEM, { headers: { Authorization: authorization }, httpsAgent });
+
+//     if (!poDetailsResponse.data || !poItemResponse.data) {
+//       return res.status(400).json({ message: "No PO Data found" });
+//     }
+
+//     // ✅ Step 1: Check if a Form with type "PO" exists, if not create one
+//     let existingForm = await Form.findOne({ type: "po" }).session(session);
+//     if (!existingForm) {
+//       existingForm = await Form.create([{ type: "po" }], { session });
+//     }
+
+//     // ✅ Step 2: Transform `PO Details` data and attach formId
+//     const poDetails = poDetailsResponse.data.d.results.map((item) => ({
+//       formId: existingForm._id,
+//       ...item,
+//       CreatedOn: parseODataDate(item.CreatedOn),
+//       Read: 0,
+//       ApprovalStatus: item.Approval === "Pending" ? 201 : 202,
+//     }));
+
+//     // ✅ Step 3: Transform `PO Items` data
+//     const poItems = poItemResponse.data.d.results.map((item) => ({
+//       formId: existingForm._id,
+//       ...item,
+//       DeliveryDate: item.DeliveryDate ? parseODataDate(item.DeliveryDate) : null,
+//     }));
+
+//     // ✅ Step 4: Fetch existing POs to avoid duplication
+//     const existingPODetails = await FormDetails.find(
+//       { PONumber: { $in: poDetails.map((item) => item.PONumber) } },
+//       { PONumber: 1 }
+//     )
+//       .session(session)
+//       .lean();
+//     const existingPONumbers = new Set(existingPODetails.map((record) => record.PONumber));
+
+//     // ✅ Step 5: Filter new POs (those not in DB) and save
+//     const newPODetails = poDetails.filter((item) => !existingPONumbers.has(item.PONumber));
+
+//     let insertedPODetails = [];
+//     if (newPODetails.length > 0) {
+//       insertedPODetails = await FormDetails.insertMany(newPODetails, { session });
+//     }
+
+//     // ✅ Step 6: Map PO Items to their respective PO ObjectId
+//     const poItemsWithObjectId = poItems.map((item) => {
+//       const podetail = insertedPODetails.find((podetail) => podetail.PONumber === item.PONumber);
+//       if (podetail) {
+//         item.PONumber = podetail._id;
+//       }
+//       return item;
+//     });
+
+//     // ✅ Step 7: Fetch existing PO Items to avoid duplication
+//     const existingPOItems = await FormItem.find(
+//       { PONumber: { $in: poItemsWithObjectId.map((item) => item.PONumber) } },
+//       { PONumber: 1 }
+//     )
+//       .session(session)
+//       .lean();
+//     const existingPOItemNumbers = new Set(existingPOItems.map((record) => record.PONumber));
+
+//     // ✅ Step 8: Filter new PO Items and save
+//     const newPOItems = poItemsWithObjectId.filter((item) => !existingPOItemNumbers.has(item.PONumber));
+
+//     if (newPOItems.length > 0) {
+//       await FormItem.insertMany(newPOItems, { session });
+//     }
+
+//     // ✅ Step 9: Check Global Rules AFTER saving POs and Items
+//     for (const po of insertedPODetails) {
+//       await checkRulesAndSetHierarchy(po._id, session);
+//     }
+
+//     await session.commitTransaction();
+//     session.endSession();
+
+//     return res.status(200).json({
+//       message: "POs saved successfully and linked to Form",
+//       savedPODetailsCount: newPODetails.length,
+//       savedPOItemsCount: newPOItems.length,
+//     });
+//   } catch (error) {
+//     await session.abortTransaction();
+//     session.endSession();
+//     console.error("Error saving PO Data:", error.message);
+//     res.status(500).json({ message: error.message });
+//   }
+// };
+
+
+
+
 const getPOdetails = async (req, res) => {
   try {
     const { depId, level } = req.authInfo.department;
@@ -245,7 +559,7 @@ const getPOdetails = async (req, res) => {
     if (!pendingStatus) {
       return res.status(400).json({ message: 'Pending status not configured', success: false });
     }
-
+console.log(appLevel)
     // Build filter condition for Read status
     let readFilter = {};
     if (filter === "Unread") {
@@ -260,12 +574,11 @@ const getPOdetails = async (req, res) => {
 
     if (sortBy === "priority") {
       // ✅ Sorting by Priority using Aggregation
-      poDetails = await PODetails.aggregate([
+      poDetails = await FormDetails.aggregate([
         {
           $match: {
             currentapprovallevel: { $ne: null },
             currentapprovallevel: appLevel,
-            approvaltype: { $ne: null },
             ApprovalStatus: pendingStatus.key,
             ...readFilter
           }
@@ -289,11 +602,10 @@ const getPOdetails = async (req, res) => {
       ]);
     } else if (sortBy === "date") {
       // ✅ Sorting by Date (Newest First)
-      poDetails = await PODetails.find({
+      poDetails = await FormDetails.find({
         $and: [
           { currentapprovallevel: { $ne: null } },
           { currentapprovallevel: appLevel },
-          { approvaltype: { $ne: null } },
           { ApprovalStatus: pendingStatus.key },
           { ...readFilter }
         ]
@@ -314,10 +626,12 @@ const getPOdetails = async (req, res) => {
     // Fetch associated items for each PO
     const poWithItems = await Promise.all(
       poDetails.map(async (po) => {
-        const items = await POItem.find({ PONumber: po._id }, '-PONumber -__v').lean();
+        const items = await FormItem.find({ PONumber: po._id }, '-PONumber -__v').lean();
         return { ...po, items };
       })
     );
+
+    console.log(poWithItems)
 
     return res.status(200).json({
       data: {
@@ -345,7 +659,7 @@ const POdetail = async (req, res) => {
 
   try {
     // Fetch PO Details within the transaction
-    const poDetails = await PODetails.findById(PONumberId, "-currentapprovallevel -__v")
+    const poDetails = await FormDetails.findById(PONumberId, "-currentapprovallevel -__v")
       .session(session)
       .lean();
 
@@ -356,10 +670,10 @@ const POdetail = async (req, res) => {
     }
 
     // Update the 'Read' field to 1 within the transaction
-    await PODetails.updateOne({ _id: PONumberId }, { $set: { Read: 1 } }).session(session);
+    await FormDetails.updateOne({ _id: PONumberId }, { $set: { Read: 1 } }).session(session);
 
     // Fetch associated PO Items in a single query within the transaction
-    const poItems = await POItem.find({ PONumber: PONumberId }, "-PONumber -_id -__v")
+    const poItems = await FormItem.find({ PONumber: PONumberId }, "-PONumber -_id -__v")
       .session(session)
       .lean();
 
@@ -388,6 +702,76 @@ const POdetail = async (req, res) => {
   }
 };
 
+const getAvailableFields = async (req, res) => {
+  // try {
+  //      // Fetch one record from each collection, excluding unnecessary fields
+  //      const formDetailsSample = await FormDetails.findOne({}, { 
+  //                                                                 _id: 0, 
+  //                                                                 PONumber: 0, 
+  //                                                                 formId: 0, 
+  //                                                                 ApprovalStatus: 0,
+  //                                                                 ReleasingStatus:0,
+  //                                                                 approvaltype:0,
+  //                                                                 Read:0,
+  //                                                                 priority:0,
+  //                                                                 currentapprovallevel:0,
+  //                                                                  __v: 0 }).lean();
+  //      const formItemsSample = await FormItem.findOne({}, { _id: 0, PONumber: 0, formId: 0, __v: 0 }).lean();
+
+  //   // Extract keys from both collections
+  //   const formDetailsFields = formDetailsSample ? Object.keys(formDetailsSample) : [];
+  //   const formItemsFields = formItemsSample ? Object.keys(formItemsSample) : [];
+
+  //   // Merge and remove duplicates
+  //   const allFields = Array.from(new Set([...formDetailsFields, ...formItemsFields]));
+
+  //   return res.status(200).json({ success: true, fields: allFields });
+  // } catch (error) {
+  //   console.error("Error fetching available fields:", error);
+  //   res.status(500).json({ success: false, message: "Failed to fetch available fields" });
+  // }
+
+
+
+  try {
+    // ✅ Function to extract fields and exclude unwanted ones
+    const extractSchemaFields = (schema, excludedFields) => {
+      let fields = [];
+      Object.keys(schema.paths).forEach((key) => {
+        if (!excludedFields.includes(key)) {
+          const fieldType = schema.paths[key].instance; // Get data type
+          fields.push({ field: key, dataType: fieldType });
+        }
+      });
+      return fields;
+    };
+
+    // ❌ Fields to exclude from FormDetails
+    const formDetailsExcludedFields = [
+      "_id", "PONumber", "formId", "ApprovalStatus", "ReleasingStatus", "approvaltype", 
+      "Read", "priority", "currentapprovallevel", "__v"
+    ];
+
+    // ❌ Fields to exclude from FormItem
+    const formItemsExcludedFields = ["_id", "PONumber", "formId", "__v"];
+
+    // ✅ Extract fields while excluding unwanted fields
+    const poItemFields = extractSchemaFields(FormItem.schema, formItemsExcludedFields);
+    const poDetailFields = extractSchemaFields(FormDetails.schema, formDetailsExcludedFields);
+
+    // ✅ Merge fields from both schemas
+    const allFields = [...poItemFields, ...poDetailFields];
+
+    res.status(200).json({
+      success: true,
+      fields: allFields,
+    });
+  } catch (error) {
+    console.error("Error fetching fields:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
 
 
 
@@ -400,4 +784,5 @@ module.exports = {
   saveAllPOData,
   getPOdetails,
   POdetail,
+  getAvailableFields
 };
