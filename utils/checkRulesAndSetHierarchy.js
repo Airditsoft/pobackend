@@ -27,7 +27,7 @@ async function checkRulesAndSetHierarchy(PONumberId, session = null) {
         for (const rule of globalRules) {
             const { field, comparisonType, ruleType, value } = rule;
             let isRulePassed = false;
-            let val;
+            let val = value;
             if(comparisonType === 'Field'){
                 if(po[value] !== undefined) val = po[value];
                 else if (poItems[0][value] !== undefined){
@@ -44,7 +44,7 @@ async function checkRulesAndSetHierarchy(PONumberId, session = null) {
 
             // ✅ Step 1: Check in PO first
             if (po[field] !== undefined) {
-                isRulePassed = evaluateCondition(po[field], ruleType, value, comparisonType, po);
+                isRulePassed = evaluateCondition(po[field], ruleType, val, comparisonType, po);
             }
 
             // ✅ Step 2: If rule not passed yet, check PO Items

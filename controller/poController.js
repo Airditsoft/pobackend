@@ -8,13 +8,8 @@ const Form = require('../models/form');
 const FormDetails = require('../models/formdetails');
 const FormItem = require('../models/formitems');
 const { parseODataDate } = require('../utils/parseddata');
-const User = require('../models/user');
-const Department = require('../models/department');
 const Status = require('../models/status');
-const ApprovalHierarchy = require('../models/approvalhierarchy');
-const {approvallevels} = require('../ApprovalLevels/approvalhierarchy')
-const { isAdmin } = require('../Authentication/authentication');
-const {checkRulesAndSetHierarchy} = require('../utils/checkRulesAndSetHierarchy')
+const {checkRulesAndSetHierarchy} = require('../ApprovalLevels/checkRule')
 
 
 
@@ -649,6 +644,9 @@ console.log(appLevel)
 
 
 
+    
+
+
 
 
 const POdetail = async (req, res) => {
@@ -749,22 +747,23 @@ const getAvailableFields = async (req, res) => {
     // ❌ Fields to exclude from FormDetails
     const formDetailsExcludedFields = [
       "_id", "PONumber", "formId", "ApprovalStatus", "ReleasingStatus", "approvaltype", 
-      "Read", "priority", "currentapprovallevel", "__v"
+      "Read", "priority","Currency", "currentapprovallevel", "__v"
     ];
 
-    // ❌ Fields to exclude from FormItem
-    const formItemsExcludedFields = ["_id", "PONumber", "formId", "__v"];
+   
 
     // ✅ Extract fields while excluding unwanted fields
-    const poItemFields = extractSchemaFields(FormItem.schema, formItemsExcludedFields);
-    const poDetailFields = extractSchemaFields(FormDetails.schema, formDetailsExcludedFields);
 
-    // ✅ Merge fields from both schemas
-    const allFields = [...poItemFields, ...poDetailFields];
+    const poDetailFields = extractSchemaFields(FormDetails.schema, formDetailsExcludedFields);
+    
+
+
+    // // ✅ Merge fields from both schemas
+    // const allFields = [...poItemFields, ...poDetailFields];
 
     res.status(200).json({
       success: true,
-      fields: allFields,
+      fields: poDetailFields,
     });
   } catch (error) {
     console.error("Error fetching fields:", error);

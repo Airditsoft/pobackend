@@ -1,89 +1,119 @@
 const FormDetails = require('../models/formdetails');
 const FormItem = require('../models/formitems');
 const GlobalRules = require('../models/globalrule');
-const {defaultlevel} = require('../ApprovalLevels/approvalrules')
-
-
-
+const { defaultlevel } = require('../ApprovalLevels/approvalrules');
+const ApprovalHierarchy = require('../models/approvalhierarchy');
 async function checkRulesAndSetHierarchy(PONumberId, session = null) {
-    try{
-
-        let matchedHierarchies = [];
+    try {
         // ✅ Fetch all Global Rules
         const globalRules = await GlobalRules.find().session(session).lean();
-        if(!globalRules){
-            const hierarchy = await defaultlevel();
-            matchedHierarchies.push(...hierarchy);
-            return;
+        if (!globalRules || globalRules.length === 0) {
+            // If no global rules exist, set default approval hierarchy
+            const approval_hierarchy = await defaultlevel();
+            await ApprovalHierarchy.create([{ PONumber: PONumberId, approval_hierarchy: approval_hierarchy }], { session });
+            return; // Exit the function early
         }
 
-         // ✅ Fetch PO and Items
-                const po = await FormDetails.findById(PONumberId).session(session);
-                const poItems = await FormItem.find({ PONumber: PONumberId }).session(session).lean();
-        
+        // ✅ Fetch PO and Items
+        const po = await FormDetails.findById(PONumberId).session(session);
+        const poItems = await FormItem.find({ PONumber: PONumberId }).session(session).lean();
 
-        //checking the rules 
+        // ✅ Check each global rule
+        let isAnyRulePassed = false; // Flag to check if any rule has passed
         for (const rule of globalRules) {
-            const { field, comparisonType, ruleType, value , approval_hierarchy } = rule;
+            const { field, comparisonType, ruleType, value, approval_hierarchy } = rule;
             let isRulePassed = false;
-            let val;
-            if(comparisonType === 'Field'){
-                if(po[value] !== undefined) val = po[value];
-                else if (poItems[0][value] !== undefined){
-                    if (summableFields.includes(value)) {
-                        // ✅ Summing up specific numeric fields before checking
-                        const totalValue = poItems.reduce((acc, item) => acc + (parseFloat(item[value]) || 0), 0);
-                        val = totalValue;
+            let compareValue;
+            let savedField;
+
+            let totalValue = 0; // Initialize totalValue to store the sum of item fields
+
+            // ✅ Determine the value to compare against
+            if (comparisonType === 'Field') {
+                if (po[value] !== undefined) {
+                    compareValue = po[value];
+                } else {
+                    // Handle special cases like 'totalitems' or summing up item fields
+                    if (value.toLowerCase() === 'totalitems') {
+                        compareValue = poItems.length;
+                    } else {
+                        // Sum up specific numeric fields from items
+                        totalValue = poItems.reduce((acc, item) => acc + (parseFloat(item[value]) || 0));
+                        compareValue = totalValue;
                     }
-                    else {
-                        val = poItems[0][value];
-                    }
-                }  
+                }
+            } else {
+                compareValue = value; // Direct comparison value
             }
 
             // ✅ Step 1: Check in PO first
             if (po[field] !== undefined) {
-                isRulePassed = evaluateCondition(po[field], ruleType, value, comparisonType, po);
+                isRulePassed = evaluateCondition(po[field], ruleType, compareValue);
             }
 
             // ✅ Step 2: If rule not passed yet, check PO Items
             if (!isRulePassed && poItems.length > 0) {
-                if (summableFields.includes(field)) {
-                    // ✅ Summing up specific numeric fields before checking
-                    const totalValue = poItems.reduce((acc, item) => acc + (parseFloat(item[field]) || 0), 0);
-                    isRulePassed = evaluateCondition(totalValue, ruleType, val, comparisonType, po);
+                if (field.toLowerCase() === 'totalitems') {
+                    isRulePassed = evaluateCondition(poItems.length, ruleType, compareValue);
+                    savedField = poItems.length; // Update the field in the PO with the totalItems count
                 } else {
-                    // ✅ Check individual PO items one by one
-                    for (const item of poItems) {
-                        if (item[field] !== undefined) {
-                            isRulePassed = evaluateCondition(item[field], ruleType, val, comparisonType, item);
-                            if (isRulePassed) break; // Stop once one item passes
-                        }
-                    }
+                    // Sum up specific numeric fields from items
+                    totalValue = poItems.reduce((acc, item) => acc + (parseFloat(item[field]) || 0), 0);
+                    isRulePassed = evaluateCondition(totalValue, ruleType, compareValue);
+                    savedField = totalValue; // Update the field in the PO with the totalValue
                 }
             }
 
-            // ✅ If rule is passed, fetch approval hierarchy
+            // ✅ If rule is passed, set the approval hierarchy and save the totalValue in the PO
             if (isRulePassed) {
-                const hierarchy = await getApprovalHierarchy(rule.field, rule.value,val,PONumberId);
-                console.log('hierarchyssssss',hierarchy)
-
-                matchedHierarchies=hierarchy;
-                // if(matchedHierarchies.length === 0) {
-                //     console.log(hierarchy)
-                //     matchedHierarchies.push(...hierarchy)
-                // }else {
-                //     let levels = mergeHierarchies(matchedHierarchies,hierarchy);
-                //     console.log('levels',hierarchy)
-                //     matchedHierarchies=levels;
-                // }
-                
+                await ApprovalHierarchy.create([{ PONumber: PONumberId, approval_hierarchy: approval_hierarchy }], { session });
+                po[field] = savedField; // Update the field in the PO document
+                po.currentapprovallevel = approval_hierarchy[0]; // Set the current approval level
+                await po.save({ session }); // Save the updated PO document
+                isAnyRulePassed = true; // Set the flag to true
+                break; // Exit the loop after setting the hierarchy and saving the PO
             }
-
-            
         }
 
-    }catch{
+        // ✅ If no rules are passed, set the default approval hierarchy
+        if (!isAnyRulePassed) {
+            const approval = await defaultlevel();
+            await ApprovalHierarchy.create([{ PONumber: PONumberId, approval_hierarchy: approval }], { session });
+            po.currentapprovallevel = approval[0]; // Set the current approval level
+            await po.save({ session }); // Save the updated PO document
+        }
 
+    } catch (error) {
+        console.error('Error in checkRulesAndSetHierarchy:', error);
+        throw error; // Re-throw the error for further handling
     }
 }
+
+// Helper function to evaluate the condition based on the rule type
+function evaluateCondition(fieldValue, ruleType, compareValue) {
+    fieldValue = String(fieldValue).toLowerCase();
+    compareValue = String(compareValue).toLowerCase();
+
+    switch (ruleType) {
+        case "contains":
+            return fieldValue.includes(compareValue);
+        case "not contains":
+            return !fieldValue.includes(compareValue);
+        case "equals":
+            return fieldValue == compareValue;
+        case "not equals":
+            return fieldValue != compareValue;
+        case "greater than":
+            return parseFloat(fieldValue) > parseFloat(compareValue);
+        case "less than":
+            return parseFloat(fieldValue) < parseFloat(compareValue);
+        case "greater than or equals":
+            return parseFloat(fieldValue) >= parseFloat(compareValue);
+        case "less than or equals":
+            return parseFloat(fieldValue) <= parseFloat(compareValue);
+        default:
+            throw new Error(`Unsupported rule type: ${ruleType}`);
+    }
+}
+
+module.exports = { checkRulesAndSetHierarchy };

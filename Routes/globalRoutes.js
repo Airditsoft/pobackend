@@ -9,6 +9,7 @@ const {uploadMultipleFiles, getAttachment, getLinks, uploadLinks} = require('../
 const {upload} = require('../Middleware/multer');
 const { costwise, defaultlevel } = require('../ApprovalLevels/approvalrules');
 const { saveGlobalRules,getGlobalRules, deleteRules } = require("../controller/globalRulesController");
+const { powerBI } = require("../controller/api");
 
 
 
@@ -45,6 +46,10 @@ globalRoutes.post('/links/:PONumber',isAuthenticated,uploadLinks);
 globalRoutes.post('/save-rules',isAuthenticated,saveGlobalRules);
 globalRoutes.get('/get-saved-rules',isAuthenticated,getGlobalRules);
 globalRoutes.delete('/delete-rule/:ruleId',isAuthenticated,deleteRules);
+
+
+//apipowerBI
+globalRoutes.get('/powerbi',powerBI)
 
 
 

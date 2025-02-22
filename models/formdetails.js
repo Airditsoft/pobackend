@@ -68,6 +68,18 @@ const PODetailsSchema = new mongoose.Schema({
   currentapprovallevel:{
     type:String,
     default:null
+  },
+  TotalPrice:{
+    type:Number
+  },
+  Price:{
+    type:Number
+  },
+  OrderQuantity:{
+    type:Number
+  },
+  TotalItems:{
+    type:Number
   }
 });
 

@@ -49,11 +49,20 @@ const saveGlobalRules = async (req, res) => {
         return res.status(400).json({ success: false, message: "Rule already exists", duplicateRule: rule });
       }
 
+      let approval_hierarchy = [];
+
+      for (const i of levels) {
+        for(let j=1;j<=i.level;j++){
+          approval_hierarchy.push(`${i.departmentId} ${j}`);
+        }
+      }
+      console.log(approval_hierarchy);
+
       // Create approval hierarchy
-      const approval_hierarchy = levels.map(level => `${level.departmentId} ${level.level}`);
+      
 
       // Save the new rule
-      const newRule = new GlobalRule({ field, comparisonType, ruleType, value, approval_hierarchy });
+      const newRule = new GlobalRule({ field, comparisonType, ruleType, value,approval_hierarchy:approval_hierarchy });
       await newRule.save({ session });
       savedRules.push(newRule);
     }

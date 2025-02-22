@@ -13,36 +13,34 @@ const CustomLevels = require('../ApprovalLevels/customLevels');
 const Attachment = require('../models/attachment');
 const {mail} = require('../utils/email');
 const ApprovalHierarchy = require('../models/approvalhierarchy');
-const approvalhierarchy = require('../models/approvalhierarchy');
+
 
 
 
 
 const showLogs = async (req, res) => {
   const { PONumberId } = req.params;
-  console.log('came .........')
-
+ 
   try {
     const PO = await PODetails.findOne({ _id: PONumberId });
-
     if (!PO) {
-      return res.status(404).json({ message: `PO not found`, success: false });
-    }
+      return res.status(404).json({ message: "PO not found", success: false }); 
+    } 
 
-    // // Fetch the Approval Levels
-    // let approvalLevels;
-    // if (PO.approvaltype === 0) {
-    //   approvalLevels = await getLevels(PONumberId);
-    // } else {
-    //   approvalLevels = await CustomLevels(PONumberId);
-    // } 
+    const status = await Status.find({ key: PO.ApprovalStatus }, "status").lean();
+    const POStatus = status[0].status;
+
+   
+
+
 
     const appr = await ApprovalHierarchy.findOne({ PONumber: PONumberId })
                               .select('approval_hierarchy')
+                              console.log(appr)
                               
     const approvalLevels = appr.approval_hierarchy;
 
-    console.log('Approval Levels:', approvalLevels);
+    
 
     const logs = [];
     const approval = await Approval.findOne({ PONumber: PONumberId });
@@ -66,9 +64,9 @@ const showLogs = async (req, res) => {
         }
       }
 
-      console.log('Logs:', logs);
+      
 
-      return res.status(200).json({ status: PO.ApprovalStatus, logs, success: true });
+      return res.status(200).json({ Approval:POStatus,logs, success: true });
     } else {
 
         // if(PO.ApprovalStatus === 202 && PO.currentapprovallevel === null){
@@ -90,10 +88,9 @@ const showLogs = async (req, res) => {
             }
 
           }
-          console.log('LogsTill hierarchy.........:', approvalLevels);
-          console.log('LogsTill hierarchy.........:', PO);
+          
             const currentLevel = approvalLevels.indexOf(PO.currentapprovallevel);
-            console.log('CurrentLevel:', currentLevel);
+            
     if(currentLevel !== -1){
         // If approval is present, iterate through approval levels
         for (let i = currentLevel; i < approvalLevels.length; i++) {
@@ -114,8 +111,8 @@ const showLogs = async (req, res) => {
           
         }
       
-         }   console.log('LogsTillENd.........:', logs);
-      return res.status(200).json({ status: PO.ApprovalStatus, logs, success: true });
+         }  
+      return res.status(200).json({ Approval:POStatus, logs, success: true });
     }
   } catch (error) {
     console.error("Error:", error.message);
@@ -216,15 +213,15 @@ const handleApprovalOrRejection = async (req, res) => {
       });
     }
 
-    // Fetch the PO details within the transaction
+    // // Fetch the PO details within the transaction
     const app_level = `${req.authInfo.department.depId} ${req.authInfo.department.level}`;
     const PO = await PODetails.findOne({ _id: PONumberId }).session(session);
 
-    if (!PO) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({ message: "PO not found", success: false });
-    }
+    // if (!PO) {
+    //   await session.abortTransaction();
+    //   session.endSession();
+    //   return res.status(404).json({ message: "PO not found", success: false });
+    // }
 
     const appr = await ApprovalHierarchy.findOne({ PONumber: PONumberId })
                               .select('approval_hierarchy')
