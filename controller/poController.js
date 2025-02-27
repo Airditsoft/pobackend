@@ -4,12 +4,15 @@ const https = require('https');
 const mongoose = require("mongoose");
 
 // Imports
+const User = require('../models/user');
 const Form = require('../models/form');
 const FormDetails = require('../models/formdetails');
 const FormItem = require('../models/formitems');
 const { parseODataDate } = require('../utils/parseddata');
 const Status = require('../models/status');
 const {checkRulesAndSetHierarchy} = require('../ApprovalLevels/checkRule')
+const ApprovalHierarchy = require('../models/approvalhierarchy');
+const GlobalRules = require('../models/globalrule');
 
 
 
@@ -773,6 +776,46 @@ const getAvailableFields = async (req, res) => {
 
 
 
+const approvalCycle = async (req, res) => {
+  const { ruleID } = req.params;
+
+
+  try {
+    const rules = await GlobalRules.findById(ruleID).lean();
+
+    if (!rules) {
+      return res.status(404).json({ message: "GlobalRules not found", success: false });
+    }
+
+
+    // Map over approvalCycle to fetch user details and extract only the name
+    const names = await Promise.all(rules.approval_hierarchy.map(async (lev) => {
+        const [departmentId, level] = lev.split(" ");
+        const user = await User.findOne({
+            "department.depId": departmentId,
+            "department.level": level,
+        });
+
+        // Return only the name of the user
+        return user ? user.name : null;
+    }));
+
+    // Filter out any null values in case some users were not found
+    const filteredNames = names.filter(name => name !== null);
+
+    return res.status(200).json({
+        approvalCycle: filteredNames,
+        success: true,
+    });
+
+} catch (error) {
+    console.error("Error Fetching approval cycle:", error.message);
+    return res.status(500).json({ message: "Internal Server Error", success: false });
+}
+
+}
+
+
 
 
 
@@ -783,5 +826,6 @@ module.exports = {
   saveAllPOData,
   getPOdetails,
   POdetail,
-  getAvailableFields
+  getAvailableFields,
+  approvalCycle,
 };

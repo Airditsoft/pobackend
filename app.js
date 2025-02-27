@@ -46,7 +46,7 @@ app.use(
   "/api",
   async (req, res, next) => {
     try {
-      const user = await User.findOne({ email: "amiyaairdit@gmail.com" });
+      const user = await User.findOne({ email: "jane.smith@example.com" });
       if (!user) {
         return res.status(401).json({ message: "User not registered" });
       }

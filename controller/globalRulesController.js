@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 const GlobalRule = require("../models/globalrule");
+const DefaultLevel = require("../models/defaultlevels");
+const Form = require('../models/form')
 
 const saveGlobalRules = async (req, res) => {
   const session = await mongoose.startSession();
@@ -8,7 +10,29 @@ const saveGlobalRules = async (req, res) => {
   try {
     console.log("Received Data:", req.body);
 
-    const { rules, levels } = req.body;
+    const { rules, levels,action } = req.body;
+
+    if (action === 'default') {
+      const result = await defaultlevels(levels, session);
+
+      if (!result.success) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          message: result.message,
+          result,
+        });
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+      return res.status(201).json({
+        success: true,
+        message: "Default  levels set successfully",
+        result,
+      });
+    }
 
     // Validate rules
     if (!Array.isArray(rules) || rules.length === 0) {
@@ -49,16 +73,11 @@ const saveGlobalRules = async (req, res) => {
         return res.status(400).json({ success: false, message: "Rule already exists", duplicateRule: rule });
       }
 
-      let approval_hierarchy = [];
+     
+    // Create approval hierarchy
+    const approval_hierarchy = createApprovalHierarchy(levels);
 
-      for (const i of levels) {
-        for(let j=1;j<=i.level;j++){
-          approval_hierarchy.push(`${i.departmentId} ${j}`);
-        }
-      }
-      console.log(approval_hierarchy);
 
-      // Create approval hierarchy
       
 
       // Save the new rule
@@ -121,6 +140,113 @@ const deleteRules = async (req,res) => {
   }
 };
 
+const defaultlevels = async (levels, session = null) => {
+  try {
+    const form = await Form.findOne({ type: "po" }).session(session);
+
+    console.log("Form:", form);
+
+    // Check if default levels already exist
+    const defaultlevel = await DefaultLevel.findOne({ formID: form._id }).session(session);
+    console.log("Default Level:", defaultlevel);
+    if (defaultlevel) {
+      return { success: false, message: "Default levels already exist" };
+    }
+
+    // Check if any level is missing required fields
+    const invalidLevels = levels.filter(level => !level.departmentId || !level.level);
+    if (invalidLevels.length > 0) {
+      return { success: false, message: "Missing required fields in some levels", invalidLevels };
+    }
+
+   
+    // Create approval hierarchy
+    const approval_hierarchy = createApprovalHierarchy(levels);
+    console.log(approval_hierarchy);
+    
+
+    // Save the new rule
+    const newRule = new DefaultLevel({ formID: form._id, approval_hierarchy: approval_hierarchy });
+    await newRule.save({ session });
+
+    return { success: true, message: "Default levels set successfully" };
+  } catch (error) {
+    console.error("Error uploading default levels:", error);
+    return { success: false, message: "Internal Server Error" };
+  }
+};
 
 
-module.exports={saveGlobalRules,getGlobalRules,deleteRules};
+const createApprovalHierarchy = (levels) => {
+  let approval_hierarchy = [];
+  for (const i of levels) {
+    for (let j = 1; j <= i.level; j++) {
+      approval_hierarchy.push(`${i.departmentId} ${j}`);
+    }
+  }
+  return approval_hierarchy;
+};
+
+
+
+const getdefaultlevels = async (req, res) => {
+  const {type} = req.query;
+  try {
+    const form = await Form.findOne({ type});
+
+    const defaultlevel = await DefaultLevel.findOne({ formID: form._id });
+    if (!defaultlevel) {
+      return res.status(400).json({ message: 'No default levels found' });
+    } else {
+      return res.status(200).json({ defaultlevel });
+    }
+
+  } catch (error) {
+    console.error('Get default levels error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+}
+
+const updateDefaultLevel = async (req, res) => {
+  const {type} = req.query;
+  const { levels } = req.body; 
+  console.log('levels:', levels);
+  console.log('type:', type);
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
+  try {
+    const form = await Form.findOne({ type }).session(session);
+    const defaultlevel = await DefaultLevel.findOne({ formID: form._id }).session(session);
+    if (!defaultlevel) {
+      return res.status(400).json({ message: 'No default levels found' });
+    }
+ 
+    // Check if any level is missing required fields
+    const invalidLevels = levels.filter(level => !level.departmentId || !level.level);
+    if (invalidLevels.length > 0) {
+      return { success: false, message: "Missing required fields in some levels", invalidLevels };
+    }
+
+    // Create approval hierarchy    
+    const approval_hierarchy = createApprovalHierarchy(levels);
+    console.log(approval_hierarchy);
+
+
+    defaultlevel.approval_hierarchy = approval_hierarchy;
+    await defaultlevel.save({ session });     
+    await session.commitTransaction();
+    session.endSession();
+
+
+    return res.status(201).json({ success: true, message: "Default levels updated successfully" });
+
+  }
+    catch(error){
+      console.error('Update default levels error:', error);
+      res.status(500).json({ message: 'Server error' });
+    }
+
+  }
+
+module.exports={saveGlobalRules,getGlobalRules,deleteRules,getdefaultlevels,updateDefaultLevel};

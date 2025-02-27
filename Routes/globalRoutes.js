@@ -2,13 +2,12 @@ const globalRoutes = require("express").Router();
 
 const { isAuthenticated ,isAdmin} = require("../Authentication/authentication");
 const { userRegister, getuserProfile } = require("../controller/usercontroller");
-const {getPOdetails,saveAllPOData,POdetail,getAvailableFields} = require("../controller/poController");
+const {getPOdetails,saveAllPOData,POdetail,getAvailableFields, approvalCycle} = require("../controller/poController");
 const { handleApprovalOrRejection, getAnalytics, getPOComments, getApprovalHistory, addComments,showLogs} = require('../controller/approvalController');
 const {customApproval,getAllDepartments} = require("../controller/customcontroller");
 const {uploadMultipleFiles, getAttachment, getLinks, uploadLinks} = require('../controller/poattachment');
 const {upload} = require('../Middleware/multer');
-const { costwise, defaultlevel } = require('../ApprovalLevels/approvalrules');
-const { saveGlobalRules,getGlobalRules, deleteRules } = require("../controller/globalRulesController");
+const { saveGlobalRules,getGlobalRules, deleteRules, getdefaultlevels, updateDefaultLevel } = require("../controller/globalRulesController");
 const { powerBI } = require("../controller/api");
 
 
@@ -26,6 +25,7 @@ globalRoutes.post("/custom-approval/:PONumberId",isAuthenticated,customApproval)
 globalRoutes.get('/analytics',isAuthenticated,getAnalytics);
 globalRoutes.get('/departments',isAuthenticated,getAllDepartments);
 globalRoutes.get("/available-fields",isAuthenticated, getAvailableFields);
+globalRoutes.get('/approval-cycle/:ruleID',isAuthenticated,approvalCycle);
 
 //approval or rejected ,history
 globalRoutes.put('/approval-rejection/:PONumberId', isAuthenticated, handleApprovalOrRejection);
@@ -46,6 +46,9 @@ globalRoutes.post('/links/:PONumber',isAuthenticated,uploadLinks);
 globalRoutes.post('/save-rules',isAuthenticated,saveGlobalRules);
 globalRoutes.get('/get-saved-rules',isAuthenticated,getGlobalRules);
 globalRoutes.delete('/delete-rule/:ruleId',isAuthenticated,deleteRules);
+globalRoutes.get('/get-default-levels',isAuthenticated,getdefaultlevels);
+globalRoutes.put('/update-rules',isAuthenticated,updateDefaultLevel);
+
 
 
 //apipowerBI
