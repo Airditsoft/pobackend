@@ -38,72 +38,97 @@ const  isAuthenticated = async(req, res, next) =>{
         if (isAdmin) {
             // Step 2: Fetch PO details for admin-level access
 
-              const { filter, sortBy } = req.query; // Get filter & sort options from query params
-                console.log(filter,sortBy)
+            const { filter, sortBy, page = 1, limit = 10, search} = req.query; // Added search parameter
+            const skip = (page - 1) * limit; // Calculate skip value
+        
+            console.log(filter, sortBy, `Page: ${page}`, `Limit: ${limit}`);
                 // Fetch the pending status key from the Status collection
                 const pendingStatus = await Status.findOne({ key: 201 }, '-_id key').lean();
                 if (!pendingStatus) {
                   return res.status(400).json({ message: 'Pending status not configured', success: false });
                 }
             
-                // Build filter condition for Read status
-                let readFilter = {};
-                if (filter === "Unread") {
-                  readFilter = { Read: 0 };
-                } else if (filter === "Read") {
-                  readFilter = { Read: 1 };
-                }
+               
+                   let readFilter = {};
+                   if (filter === "Unread") {
+                     readFilter = { Read: 0 };
+                   } else if (filter === "Read") {
+                     readFilter = { Read: 1 };
+                   }
+               
+                   // Build the base query
+                   const baseQuery = {
+                     ApprovalStatus: pendingStatus.key,
+                     ...readFilter,
+                   };
+               
+                   // Add search functionality if search term is provided
+                   if (search && search.trim().replace(/[^a-zA-Z0-9]/g, "") !== "") {
+                     const searchQuery = { $regex: search, $options: "i" }; // Case-insensitive regex
+                     const excludedFields = ['ApprovalStatus', 'currentapprovallevel', 'Read'];
+                     const stringFields = Object.keys(PODetails.schema.paths).filter(
+                       (field) => PODetails.schema.paths[field].instance === "String" && !excludedFields.includes(field)
+                     );
+               
+                     baseQuery.$and = baseQuery.$and || [];
+                     baseQuery.$and.push({
+                       $or: stringFields.map((field) => ({ [field]: searchQuery })),
+                     });
+                   }
             
                 let poDetails = [];
             
                 
             
-                if (sortBy === "priority") {
-                  // ✅ Sorting by Priority using Aggregation
-                  poDetails = await PODetails.aggregate([
-                    {
-                      $match: {
-                        ApprovalStatus: pendingStatus.key,
-                        ...readFilter
-                      }
-                    },
-                    {
-                      $addFields: {
-                        priorityValue: {
-                          $switch: {
-                            branches: [
-                              { case: { $eq: ["$priority", "High"] }, then: 3 },
-                              { case: { $eq: ["$priority", "Medium"] }, then: 2 },
-                              { case: { $eq: ["$priority", "Low"] }, then: 1 }
-                            ],
-                            default: 0
+                 if (sortBy === "priority") {
+                      poDetails = await PODetailsDetails.aggregate([
+                        {
+                          $match: baseQuery,
+                        },
+                        {
+                          $addFields: {
+                            priorityValue: {
+                              $switch: {
+                                branches: [
+                                  { case: { $eq: ["$priority", "High"] }, then: 3 },
+                                  { case: { $eq: ["$priority", "Medium"] }, then: 2 },
+                                  { case: { $eq: ["$priority", "Low"] }, then: 1 }
+                                ],
+                                default: 0
+                              }
+                            }
                           }
-                        }
-                      }
-                    },
-                    { $sort: { priorityValue: -1 } }, // Sort High → Medium → Low
-                    { $project: { priorityValue: 0 } } // Remove extra field from output
-                  ]);
-                } else if (sortBy === "date") {
-                  // ✅ Sorting by Date (Newest First)
-                  poDetails = await PODetails.find({
-                    $and: [
-                      { ApprovalStatus: pendingStatus.key },
-                      { ...readFilter }
-                    ]
-                  })
-                  .sort({ CreatedOn: -1 }) // Sort Newest First
-                  .lean();
-                }
-            
-                if (!poDetails || poDetails.length === 0) {
-                  return res.status(200).json({
-                    poWithItems:[],
-                    poDetailsCount: 0,
-                    isAdmin: true,
-                    success: false,
-                  });
-                }
+                        },
+                        { $sort: { priorityValue: -1 } },
+                        { $skip: skip },
+                        { $limit: +limit },
+                        { $project: { priorityValue: 0 } }
+                      ]);
+                    } else { // sortBy "date" or default case
+                      poDetails = await PODetails.find(baseQuery)
+                        .sort({ CreatedOn: -1 })
+                        .skip(skip)
+                        .limit(+limit)
+                        .lean();
+                    };
+                 const totalCount = await PODetails.countDocuments(baseQuery);
+                    
+                    const Unread = await PODetails.find({
+                      ApprovalStatus: pendingStatus.key,
+                      Read: 0
+                    }).countDocuments();  // Count unread POs
+           
+               if (!poDetails || poDetails.length === 0) {
+                 return res.status(200).json({
+                   poWithItems:[],
+                   poDetailsCount: 0,
+                   isAdmin: true,
+                   success: false,
+                   totalCount,
+                   totalUnread: Unread,
+                   totalPages: Math.ceil(totalCount / limit),
+                 });
+               }
             
                 // Fetch associated items for each PO
                 const poWithItems = await Promise.all(
@@ -118,6 +143,9 @@ const  isAuthenticated = async(req, res, next) =>{
                     poDetailsCount: poDetails.length,
                     poWithItems,
                     isAdmin:true,
+                    totalCount,
+                    totalUnread: Unread,
+                    totalPages: Math.ceil(totalCount / limit),
                   },
                   success: true,
                 });

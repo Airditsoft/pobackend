@@ -11,8 +11,8 @@ const FormItem = require('../models/formitems');
 const { parseODataDate } = require('../utils/parseddata');
 const Status = require('../models/status');
 const {checkRulesAndSetHierarchy} = require('../ApprovalLevels/checkRule')
-const ApprovalHierarchy = require('../models/approvalhierarchy');
 const GlobalRules = require('../models/globalrule');
+const DefaultRules = require('../models/defaultlevels');
 
 
 
@@ -546,19 +546,142 @@ if(insertedPODetails.length === 0){
 
 
 
+// const getPOdetails = async (req, res) => {
+//   try {
+//     const { depId, level } = req.authInfo.department;
+//     const appLevel = `${depId} ${level}`;
+//     const { filter, sortBy, page = 1, limit = 10 } = req.query; // Default page to 1 and limit to 10 if not provided
+//     const skip = (page - 1) * limit; // Calculate skip
+
+//     console.log(filter, sortBy, `Page: ${page}`, `Limit: ${limit}`);
+
+//     const pendingStatus = await Status.findOne({ key: 201 }, '-_id key').lean();
+//     if (!pendingStatus) {
+//       return res.status(400).json({ message: 'Pending status not configured', success: false });
+//     }
+
+//     console.log(appLevel);
+
+//     let readFilter = {};
+//     if (filter === "Unread") {
+//       readFilter = { Read: 0 };
+//     } else if (filter === "Read") {
+//       readFilter = { Read: 1 };
+//     }
+
+//     let poDetails = [];
+
+//     if (sortBy === "priority") {
+//       poDetails = await FormDetails.aggregate([
+//         {
+//           $match: {
+//             currentapprovallevel: appLevel,
+//             ApprovalStatus: pendingStatus.key,
+//             ...readFilter
+//           }
+//         },
+//         {
+//           $addFields: {
+//             priorityValue: {
+//               $switch: {
+//                 branches: [
+//                   { case: { $eq: ["$priority", "High"] }, then: 3 },
+//                   { case: { $eq: ["$priority", "Medium"] }, then: 2 },
+//                   { case: { $eq: ["$priority", "Low"] }, then: 1 }
+//                 ],
+//                 default: 0
+//               }
+//             }
+//           }
+//         },
+//         { $sort: { priorityValue: -1 } },
+//         { $skip: skip },
+//         { $limit: +limit },
+//         { $project: { priorityValue: 0 } }
+//       ]);
+//     } else { // sortBy "date" or default case
+//       poDetails = await FormDetails.find({
+//         currentapprovallevel: appLevel,
+//         ApprovalStatus: pendingStatus.key,
+//         ...readFilter
+//       })
+//       .sort({ CreatedOn: -1 })
+//       .skip(skip)
+//       .limit(+limit)
+//       .lean();
+//     }
+
+//     const totalCount = await FormDetails.countDocuments({
+//       currentapprovallevel: appLevel,
+//       ApprovalStatus: pendingStatus.key,
+//       ...readFilter
+//     });
+
+//     const Unread = await FormDetails.find({
+//       currentapprovallevel: appLevel,
+//       ApprovalStatus: pendingStatus.key,
+//       Read: 0
+//     }).countDocuments();  // Count read POs
+
+//     console.log(Unread)
+
+//     console.log(totalCount);
+
+//     if (!poDetails || poDetails.length === 0) {
+//       return res.status(200).json({
+//         data: {
+//           poWithItems: [],
+//           poDetailsCount: 0,
+//           isAdmin: false,
+//           totalCount,
+//           totalUnread: Unread,
+//           totalPages: Math.ceil(totalCount / limit),
+//         },
+//         success: false,
+//       });
+//     }
+
+//     const poWithItems = await Promise.all(
+//       poDetails.map(async (po) => {
+//         const items = await FormItem.find({ PONumber: po._id }, '-PONumber -__v').lean();
+//         return { ...po, items };
+//       })
+//     );
+
+//     return res.status(200).json({
+//       data: {
+//         poDetailsCount: poDetails.length,
+//         poWithItems,
+//         isAdmin: false,
+//         totalCount,
+//         totalUnread: Unread,
+//         totalPages: Math.ceil(totalCount / limit),
+//       },
+//       success: true,
+//     });
+//   } catch (error) {
+//     console.error('Error fetching PO details with items:', error.message);
+//     return res.status(500).json({ message: 'An error occurred', success: false });
+//   }
+// };
+
+
 const getPOdetails = async (req, res) => {
   try {
     const { depId, level } = req.authInfo.department;
     const appLevel = `${depId} ${level}`;
-    const { filter, sortBy } = req.query; // Get filter & sort options from query params
-    console.log(filter,sortBy)
-    // Fetch the pending status key from the Status collection
+    const { filter, sortBy, page = 1, limit = 10, search} = req.query; // Added search parameter
+    const skip = (page - 1) * limit; // Calculate skip
+
+    console.log(filter, sortBy, `Page: ${page}`, `Limit: ${limit}`, `Search: ${search}`);
+
     const pendingStatus = await Status.findOne({ key: 201 }, '-_id key').lean();
     if (!pendingStatus) {
       return res.status(400).json({ message: 'Pending status not configured', success: false });
     }
-console.log(appLevel)
-    // Build filter condition for Read status
+
+    console.log(appLevel);
+
     let readFilter = {};
     if (filter === "Unread") {
       readFilter = { Read: 0 };
@@ -566,20 +689,33 @@ console.log(appLevel)
       readFilter = { Read: 1 };
     }
 
+    // Build the base query
+    const baseQuery = {
+      currentapprovallevel: appLevel,
+      ApprovalStatus: pendingStatus.key,
+      ...readFilter,
+    };
+
+    // Add search functionality if search term is provided
+    if (search && search.trim().replace(/[^a-zA-Z0-9]/g, "") !== "") {
+      const searchQuery = { $regex: search, $options: "i" }; // Case-insensitive regex
+      const excludedFields = ['ApprovalStatus', 'currentapprovallevel', 'Read'];
+      const stringFields = Object.keys(FormDetails.schema.paths).filter(
+        (field) => FormDetails.schema.paths[field].instance === "String" && !excludedFields.includes(field)
+      );
+
+      baseQuery.$and = baseQuery.$and || [];
+      baseQuery.$and.push({
+        $or: stringFields.map((field) => ({ [field]: searchQuery })),
+      });
+    }
+
     let poDetails = [];
 
-    
-
     if (sortBy === "priority") {
-      // ✅ Sorting by Priority using Aggregation
       poDetails = await FormDetails.aggregate([
         {
-          $match: {
-            currentapprovallevel: { $ne: null },
-            currentapprovallevel: appLevel,
-            ApprovalStatus: pendingStatus.key,
-            ...readFilter
-          }
+          $match: baseQuery,
         },
         {
           $addFields: {
@@ -595,33 +731,45 @@ console.log(appLevel)
             }
           }
         },
-        { $sort: { priorityValue: -1 } }, // Sort High → Medium → Low
-        { $project: { priorityValue: 0 } } // Remove extra field from output
+        { $sort: { priorityValue: -1 } },
+        { $skip: skip },
+        { $limit: +limit },
+        { $project: { priorityValue: 0 } }
       ]);
-    } else if (sortBy === "date") {
-      // ✅ Sorting by Date (Newest First)
-      poDetails = await FormDetails.find({
-        $and: [
-          { currentapprovallevel: { $ne: null } },
-          { currentapprovallevel: appLevel },
-          { ApprovalStatus: pendingStatus.key },
-          { ...readFilter }
-        ]
-      })
-      .sort({ CreatedOn: -1 }) // Sort Newest First
-      .lean();
-    }
+    } else { // sortBy "date" or default case
+      poDetails = await FormDetails.find(baseQuery)
+        .sort({ CreatedOn: -1 })
+        .skip(skip)
+        .limit(+limit)
+        .lean();
+    };
+    console.log(poDetails);
+
+    const totalCount = await FormDetails.countDocuments(baseQuery);
+
+    const Unread = await FormDetails.find({
+      currentapprovallevel: appLevel,
+      ApprovalStatus: pendingStatus.key,
+      Read: 0
+    }).countDocuments();  // Count unread POs
+
+    console.log(Unread);
+    console.log(totalCount);
 
     if (!poDetails || poDetails.length === 0) {
       return res.status(200).json({
-        poWithItems:[],
-        poDetailsCount: 0,
-        isAdmin: false,
+        data: {
+          poWithItems: [],
+          poDetailsCount: 0,
+          isAdmin: false,
+          totalCount,
+          totalUnread: Unread,
+          totalPages: Math.ceil(totalCount / limit),
+        },
         success: false,
       });
     }
 
-    // Fetch associated items for each PO
     const poWithItems = await Promise.all(
       poDetails.map(async (po) => {
         const items = await FormItem.find({ PONumber: po._id }, '-PONumber -__v').lean();
@@ -629,13 +777,14 @@ console.log(appLevel)
       })
     );
 
-    console.log(poWithItems)
-
     return res.status(200).json({
       data: {
         poDetailsCount: poDetails.length,
         poWithItems,
-        isAdmin:false,
+        isAdmin: false,
+        totalCount,
+        totalUnread: Unread,
+        totalPages: Math.ceil(totalCount / limit),
       },
       success: true,
     });
@@ -775,51 +924,101 @@ const getAvailableFields = async (req, res) => {
 };
 
 
-
 const approvalCycle = async (req, res) => {
   const { ruleID } = req.params;
-
+  const { type } = req.query;
 
   try {
-    const rules = await GlobalRules.findById(ruleID).lean();
-
-    if (!rules) {
-      return res.status(404).json({ message: "GlobalRules not found", success: false });
+    // Fetch the form based on the type for PR or anything comes for future use 
+    const form = await Form.findOne({ type}).lean();
+    console.log(form);
+    if (!form) {
+      return res.status(404).json({ message: "Form not found", success: false });
     }
 
+    // Fetch the global rules based on the ruleID
+      const rules = await GlobalRules.findById(ruleID).lean();
+   
+
+    if (!rules) {
+      return res.status(404).json({ message: "Rules not found", success: false });
+    }
 
     // Map over approvalCycle to fetch user details and extract only the name
-    const names = await Promise.all(rules.approval_hierarchy.map(async (lev) => {
+    const names = await Promise.all(
+      rules.approval_hierarchy.map(async (lev) => {
         const [departmentId, level] = lev.split(" ");
         const user = await User.findOne({
-            "department.depId": departmentId,
-            "department.level": level,
+          "department.depId": departmentId,
+          "department.level": level,
         });
 
         // Return only the name of the user
         return user ? user.name : null;
-    }));
+      })
+    );
 
     // Filter out any null values in case some users were not found
-    const filteredNames = names.filter(name => name !== null);
+    const filteredNames = names.filter((name) => name !== null);
 
     return res.status(200).json({
-        approvalCycle: filteredNames,
-        success: true,
+      approvalCycle: filteredNames,
+      success: true,
     });
-
-} catch (error) {
+  } catch (error) {
     console.error("Error Fetching approval cycle:", error.message);
     return res.status(500).json({ message: "Internal Server Error", success: false });
-}
-
-}
-
+  }
+};
 
 
+const defaultCycle = async (req, res) => {
+  const { type } = req.query;
 
+  try {
+    // Fetch the form based on the type
+    const form = await Form.findOne({ type }).lean();
 
+    if (!form) {
+      return res.status(404).json({ message: "Form not found", success: false });
+    }
+    console.log("Form:", form);
+    console.log("Form ID:", form._id);
 
+    // Fetch the default approval cycle for the form
+    const defaultCycle = await DefaultRules.findOne({ formID: form._id }).lean();
+    console.log("Default Cycle:", defaultCycle);
+
+    if (!defaultCycle) {
+      return res.status(404).json({ message: "Default cycle not set! Please set it.", success: false });
+    }
+
+    // Map over approval_hierarchy to fetch user details and extract only the name
+    const names = await Promise.all(
+      defaultCycle.approval_hierarchy.map(async (lev) => {
+        const [departmentId, level] = lev.split(" ");
+        const user = await User.findOne({
+          "department.depId": departmentId,
+          "department.level": level,
+        });
+
+        // Return only the name of the user
+        return user ? user.name : null;
+      })
+    );
+
+    // Filter out any null values in case some users were not found
+    const filteredNames = names.filter((name) => name !== null);
+
+    return res.status(200).json({
+      approvalCycle: filteredNames,
+      success: true,
+    });
+  } catch (error) {
+    console.error("Error Fetching default approval cycle:", error.message);
+    return res.status(500).json({ message: "Internal Server Error", success: false });
+  }
+};
 
 
 module.exports = {
@@ -828,4 +1027,5 @@ module.exports = {
   POdetail,
   getAvailableFields,
   approvalCycle,
+  defaultCycle
 };

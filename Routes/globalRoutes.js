@@ -2,7 +2,7 @@ const globalRoutes = require("express").Router();
 
 const { isAuthenticated ,isAdmin} = require("../Authentication/authentication");
 const { userRegister, getuserProfile } = require("../controller/usercontroller");
-const {getPOdetails,saveAllPOData,POdetail,getAvailableFields, approvalCycle} = require("../controller/poController");
+const {getPOdetails,saveAllPOData,POdetail,getAvailableFields, approvalCycle, defaultCycle} = require("../controller/poController");
 const { handleApprovalOrRejection, getAnalytics, getPOComments, getApprovalHistory, addComments,showLogs} = require('../controller/approvalController');
 const {customApproval,getAllDepartments} = require("../controller/customcontroller");
 const {uploadMultipleFiles, getAttachment, getLinks, uploadLinks} = require('../controller/poattachment');
@@ -26,6 +26,7 @@ globalRoutes.get('/analytics',isAuthenticated,getAnalytics);
 globalRoutes.get('/departments',isAuthenticated,getAllDepartments);
 globalRoutes.get("/available-fields",isAuthenticated, getAvailableFields);
 globalRoutes.get('/approval-cycle/:ruleID',isAuthenticated,approvalCycle);
+globalRoutes.get('/default-cycle',isAuthenticated,defaultCycle);
 
 //approval or rejected ,history
 globalRoutes.put('/approval-rejection/:PONumberId', isAuthenticated, handleApprovalOrRejection);
