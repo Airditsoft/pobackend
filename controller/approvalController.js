@@ -591,6 +591,113 @@ const addComments = async (req, res) => {
 
 
 
+const sapLogs = async (req, res) => {
+  const { PONumber } = req.params;
+ 
+  try {
+    const PO = await PODetails.findOne({PONumber});
+    if (!PO) {
+      return res.status(404).json({ message: "PO not found", success: false }); 
+    } 
+
+    const status = await Status.find({ key: PO.ApprovalStatus }, "status").lean();
+    const POStatus = status[0].status;
+
+   
+
+
+
+    const appr = await ApprovalHierarchy.findOne({ PONumber: PO._id })
+                              .select('approval_hierarchy')
+                              console.log(appr)
+                              
+    const approvalLevels = appr.approval_hierarchy;
+
+    
+
+    const logs = [];
+    const approval = await Approval.findOne({ PONumber: PO._id });
+
+    if (!approval) {
+      // If approval is not present, assume all levels are pending
+      for (let i of approvalLevels) {
+        const [departmentId, level] = i.split(" ");
+        const user = await User.findOne({
+          "department.depId": departmentId,
+          "department.level": level,
+        });
+
+        if (user) {
+          logs.push({
+            username: user.name,
+            email: user.email,
+            status: "pending",
+            comment: null,
+            createdAt: null,
+          });
+        }
+      }
+
+      
+
+      return res.status(200).json({ PONumber,Approval:POStatus,logs, success: true });
+    } else {
+
+        // if(PO.ApprovalStatus === 202 && PO.currentapprovallevel === null){
+        //   return res.status(200).json({ status: PO.ApprovalStatus, logs, success: true });
+        // }
+
+          for(let i of approval.approval_hierarchy){
+            const user = await User.findOne({
+              "department.depId": i.departmentId,
+              "department.level": i.level,
+            });
+            if (user) {
+              logs.push({
+                username: user ? user.name : "Unknown User",
+                email: user.email,
+                status: i.action === "approve" ? "approved" : "rejected",
+                comment: i.comment,
+                createdAt: i.createdAt,
+              });
+            }
+
+          }
+          
+            const currentLevel = approvalLevels.indexOf(PO.currentapprovallevel);
+            
+    if(currentLevel !== -1){
+        // If approval is present, iterate through approval levels
+        for (let i = currentLevel; i < approvalLevels.length; i++) {
+          const [departmentId, level] = approvalLevels[i].split(" ");
+          const user = await User.findOne({
+            "department.depId": departmentId,
+            "department.level": level,
+          });
+  
+         
+              // If not in the approval hierarchy, mark it as pending
+              logs.push({
+                username: user.name,
+                email: user.email,
+                status: "pending",
+                comment: null,
+                createdAt:null
+              });
+          
+        }
+      
+         }  
+      return res.status(200).json({ PONumber,Approval:POStatus, logs, success: true });
+    }
+  } catch (error) {
+    console.error("Error:", error.message);
+    return res
+      .status(500)
+      .json({ message: "An error occurred", success: false });
+  }
+};
+
 
 module.exports = { 
           
@@ -599,7 +706,8 @@ module.exports = {
                     getAnalytics,
                     getPOComments,
                     addComments,
-                    showLogs
+                    showLogs,
+                    sapLogs
                   
                   };
 

@@ -3,7 +3,7 @@ const globalRoutes = require("express").Router();
 const { isAuthenticated ,isAdmin} = require("../Authentication/authentication");
 const { userRegister, getuserProfile } = require("../controller/usercontroller");
 const {getPOdetails,saveAllPOData,POdetail,getAvailableFields, approvalCycle, defaultCycle} = require("../controller/poController");
-const { handleApprovalOrRejection, getAnalytics, getPOComments, getApprovalHistory, addComments,showLogs} = require('../controller/approvalController');
+const { handleApprovalOrRejection, getAnalytics, getPOComments, getApprovalHistory, addComments,showLogs, sapLogs} = require('../controller/approvalController');
 const {customApproval,getAllDepartments} = require("../controller/customcontroller");
 const {uploadMultipleFiles, getAttachment, getLinks, uploadLinks} = require('../controller/poattachment');
 const {upload} = require('../Middleware/multer');
@@ -53,7 +53,8 @@ globalRoutes.put('/update-rules',isAuthenticated,updateDefaultLevel);
 
 
 //apipowerBI
-globalRoutes.get('/powerbi',powerBI)
+globalRoutes.get('/powerbi',powerBI);
+globalRoutes.get('/saplogs/:PONumber',sapLogs);
 
 
 

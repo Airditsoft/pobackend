@@ -1,6 +1,8 @@
 
 const POItem = require('../models/formitems');
-const {getAllApprovalLevelsWithDepartments} = require('./getLevels')
+const {getAllApprovalLevelsWithDepartments} = require('./getLevels');
+const Form = require('../models/form');
+const DefaultRules = require('../models/defaultlevels');
 
 
 
@@ -149,17 +151,36 @@ const quantitywise = async (PONumber,val) => {
        
 
 const defaultlevel = async () => {
-    const approvallevel = await getAllApprovalLevelsWithDepartments();
+  try {
+    // Find all forms of type 'po'
+    const form = await Form.findOne({ type: 'po' }).lean();
+    console.log(form)
 
-    let defaultLevels=[];
+    // Check if forms were found
+    if (!form) {
+      throw new Error('No forms found');
+    }
 
-    approvallevel.forEach((data,index)=>{
-        const level = data.users;
-        const app_level = level.map((app) => `${data.depId} ${app.department.level}`);
-        defaultLevels.push(...app_level);
-    });
-console.log('default',defaultLevels)
+    let defaultLevels = [];
+
+    // Iterate over each form to find the corresponding approval hierarchy
+  
+      const approvallevel = await DefaultRules.findOne({ formID: form._id }).lean();
+      console.log(approvallevel)
+      // console.log(approvallevel.approval_hierarchy)
+
+      // Check if approval level was found for the form
+      if (approvallevel && approvallevel.approval_hierarchy) {
+        defaultLevels.push(...approvallevel.approval_hierarchy);
+   
+    }
+
+    console.log('DefaultLevels:', defaultLevels);
     return defaultLevels;
-}
+  } catch (error) {
+    console.error('Error in defaultlevel function:', error);
+    throw error; // Re-throw the error to handle it in the calling function
+  }
+};
 
 module.exports = {quantitywise,defaultlevel,totalPrice,custom}

@@ -120,6 +120,7 @@ const  isAuthenticated = async(req, res, next) =>{
            
                if (!poDetails || poDetails.length === 0) {
                  return res.status(200).json({
+                  data: {
                    poWithItems:[],
                    poDetailsCount: 0,
                    isAdmin: true,
@@ -127,6 +128,9 @@ const  isAuthenticated = async(req, res, next) =>{
                    totalCount,
                    totalUnread: Unread,
                    totalPages: Math.ceil(totalCount / limit),
+                  },
+                  success: false,
+
                  });
                }
             

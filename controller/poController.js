@@ -939,7 +939,7 @@ const approvalCycle = async (req, res) => {
     // Fetch the global rules based on the ruleID
       const rules = await GlobalRules.findById(ruleID).lean();
    
-
+console.log(rules);
     if (!rules) {
       return res.status(404).json({ message: "Rules not found", success: false });
     }

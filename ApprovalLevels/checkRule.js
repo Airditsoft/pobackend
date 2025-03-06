@@ -1,8 +1,5 @@
-const FormDetails = require('../models/formdetails');
-const FormItem = require('../models/formitems');
-const GlobalRules = require('../models/globalrule');
-const { defaultlevel } = require('../ApprovalLevels/approvalrules');
-const ApprovalHierarchy = require('../models/approvalhierarchy');
+const moment = require('moment'); // Assuming you're using moment.js for date manipulation
+
 async function checkRulesAndSetHierarchy(PONumberId, session = null) {
     try {
         // ✅ Fetch all Global Rules
@@ -48,18 +45,18 @@ async function checkRulesAndSetHierarchy(PONumberId, session = null) {
 
             // ✅ Step 1: Check in PO first
             if (po[field] !== undefined) {
-                isRulePassed = evaluateCondition(po[field], ruleType, compareValue);
+                isRulePassed = evaluateCondition(po[field], ruleType, compareValue, field);
             }
 
             // ✅ Step 2: If rule not passed yet, check PO Items
             if (!isRulePassed && poItems.length > 0) {
                 if (field.toLowerCase() === 'totalitems') {
-                    isRulePassed = evaluateCondition(poItems.length, ruleType, compareValue);
+                    isRulePassed = evaluateCondition(poItems.length, ruleType, compareValue, field);
                     savedField = poItems.length; // Update the field in the PO with the totalItems count
                 } else {
                     // Sum up specific numeric fields from items
                     totalValue = poItems.reduce((acc, item) => acc + (parseFloat(item[field]) || 0), 0);
-                    isRulePassed = evaluateCondition(totalValue, ruleType, compareValue);
+                    isRulePassed = evaluateCondition(totalValue, ruleType, compareValue, field);
                     savedField = totalValue; // Update the field in the PO with the totalValue
                 }
             }
@@ -90,9 +87,18 @@ async function checkRulesAndSetHierarchy(PONumberId, session = null) {
 }
 
 // Helper function to evaluate the condition based on the rule type
-function evaluateCondition(fieldValue, ruleType, compareValue) {
-    fieldValue = String(fieldValue).toLowerCase();
-    compareValue = String(compareValue).toLowerCase();
+function evaluateCondition(fieldValue, ruleType, compareValue, field) {
+    // Handle date fields separately
+    if (field.toLowerCase() === 'createdon') {
+        const fieldDate = moment(fieldValue).format('DD/MM/YYYY'); // Convert to the same format as compareValue
+        const compareDate = moment(compareValue, 'DD/MM/YYYY').format('DD/MM/YYYY'); // Ensure compareValue is in the correct format
+
+        fieldValue = fieldDate;
+        compareValue = compareDate;
+    } else {
+        fieldValue = String(fieldValue).toLowerCase();
+        compareValue = String(compareValue).toLowerCase();
+    }
 
     switch (ruleType) {
         case "contains":
