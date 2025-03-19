@@ -12,8 +12,11 @@ const summableFields = ["Price", "Quantity", "TotalPrice", "OrderQuantity"];
 async function checkRulesAndSetHierarchy(PONumberId, session = null) {
     try {
         let matchedHierarchies = [];
+
+        console.log('came')
             // ✅ Fetch all Global Rules
             const globalRules = await GlobalRules.find().session(session).lean();
+            console.log(globalRules)
             if(!globalRules){
                 const hierarchy = await defaultlevel();
                 matchedHierarchies.push(...hierarchy);

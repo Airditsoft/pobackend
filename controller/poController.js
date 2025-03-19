@@ -13,7 +13,7 @@ const Status = require('../models/status');
 const {checkRulesAndSetHierarchy} = require('../ApprovalLevels/checkRule')
 const GlobalRules = require('../models/globalrule');
 const DefaultRules = require('../models/defaultlevels');
-
+const AlternateApproval = require('../models/alternateapproval');
 
 
 
@@ -666,21 +666,37 @@ if(insertedPODetails.length === 0){
 // };
 
 
+const isTodayWithinRange = (fromDate, toDate) => {
+  const today = new Date();
+  const start = new Date(fromDate);
+  const end = new Date(toDate);
+
+  // Set the time component to 0 for all dates to ensure accurate comparison of dates only
+  today.setHours(0, 0, 0, 0);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(0, 0, 0, 0);
+
+  return today >= start && today <= end;
+};
+
 const getPOdetails = async (req, res) => {
   try {
     const { depId, level } = req.authInfo.department;
     const appLevel = `${depId} ${level}`;
-    const { filter, sortBy, page = 1, limit = 10, search} = req.query; // Added search parameter
-    const skip = (page - 1) * limit; // Calculate skip
+    const { filter, sortBy, page = 1, limit = 10, search } = req.query;
+    const skip = (page - 1) * limit;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);  // Set today with no time component
 
-    console.log(filter, sortBy, `Page: ${page}`, `Limit: ${limit}`, `Search: ${search}`);
+    // Fetch alternate approver details, assuming it can return multiple entries
+    const alternates = await AlternateApproval.find({
+      alternateApprover: appLevel
+    }).lean();
 
     const pendingStatus = await Status.findOne({ key: 201 }, '-_id key').lean();
     if (!pendingStatus) {
       return res.status(400).json({ message: 'Pending status not configured', success: false });
     }
-
-    console.log(appLevel);
 
     let readFilter = {};
     if (filter === "Unread") {
@@ -689,74 +705,52 @@ const getPOdetails = async (req, res) => {
       readFilter = { Read: 1 };
     }
 
-    // Build the base query
+    // Build the base query, initially only including the logged-in user's approval level
     const baseQuery = {
-      currentapprovallevel: appLevel,
+      $or: [{ currentapprovallevel: appLevel }],
       ApprovalStatus: pendingStatus.key,
       ...readFilter,
     };
+    console.log('alternates',alternates)
+
+    // Iterate over each alternate and check if today's date is within their valid date range
+    alternates.forEach(({ createdBy, fromDate, toDate }) => {
+      console.log(createdBy)
+      const start = new Date(fromDate);
+      const end = new Date(toDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(0, 0, 0, 0);
+      if (today >= start && today <= end) {
+        console.log('createdby',createdBy)
+        baseQuery.$or.push({ currentapprovallevel: createdBy });
+      }
+    });
 
     // Add search functionality if search term is provided
     if (search && search.trim().replace(/[^a-zA-Z0-9]/g, "") !== "") {
       const searchQuery = { $regex: search, $options: "i" }; // Case-insensitive regex
-      const excludedFields = ['ApprovalStatus', 'currentapprovallevel', 'Read'];
+      const excludedFields = ['ApprovalStatus', 'currentapprovallevel', 'Read', 'createdBy'];
       const stringFields = Object.keys(FormDetails.schema.paths).filter(
-        (field) => FormDetails.schema.paths[field].instance === "String" && !excludedFields.includes(field)
+        field => FormDetails.schema.paths[field].instance === "String" && !excludedFields.includes(field)
       );
 
       baseQuery.$and = baseQuery.$and || [];
       baseQuery.$and.push({
-        $or: stringFields.map((field) => ({ [field]: searchQuery })),
+        $or: stringFields.map(field => ({ [field]: searchQuery }))
       });
     }
 
-    let poDetails = [];
+    console.log(baseQuery)
+    const sortMethod = sortBy === "priority" ? { priorityValue: -1 } : { CreatedOn: -1 };
+    let queryOptions = { skip, limit: +limit, sort: sortMethod };
 
-    if (sortBy === "priority") {
-      poDetails = await FormDetails.aggregate([
-        {
-          $match: baseQuery,
-        },
-        {
-          $addFields: {
-            priorityValue: {
-              $switch: {
-                branches: [
-                  { case: { $eq: ["$priority", "High"] }, then: 3 },
-                  { case: { $eq: ["$priority", "Medium"] }, then: 2 },
-                  { case: { $eq: ["$priority", "Low"] }, then: 1 }
-                ],
-                default: 0
-              }
-            }
-          }
-        },
-        { $sort: { priorityValue: -1 } },
-        { $skip: skip },
-        { $limit: +limit },
-        { $project: { priorityValue: 0 } }
-      ]);
-    } else { // sortBy "date" or default case
-      poDetails = await FormDetails.find(baseQuery)
-        .sort({ CreatedOn: -1 })
-        .skip(skip)
-        .limit(+limit)
-        .lean();
-    };
-    console.log(poDetails);
+    const [poDetails, totalCount, Unread] = await Promise.all([
+      FormDetails.find(baseQuery, null, queryOptions).lean(),
+      FormDetails.countDocuments(baseQuery),
+      FormDetails.countDocuments({...baseQuery, Read: 0})
+    ]);
 
-    const totalCount = await FormDetails.countDocuments(baseQuery);
-
-    const Unread = await FormDetails.find({
-      currentapprovallevel: appLevel,
-      ApprovalStatus: pendingStatus.key,
-      Read: 0
-    }).countDocuments();  // Count unread POs
-
-    console.log(Unread);
-    console.log(totalCount);
-
-    if (!poDetails || poDetails.length === 0) {
+    if (!poDetails.length) {
       return res.status(200).json({
         data: {
           poWithItems: [],
@@ -789,10 +783,12 @@ const getPOdetails = async (req, res) => {
       success: true,
     });
   } catch (error) {
-    console.error('Error fetching PO details with items:', error.message);
+    console.error('Error fetching PO details with items:', error);
     return res.status(500).json({ message: 'An error occurred', success: false });
   }
 };
+
+
 
 
 
@@ -1019,6 +1015,8 @@ const defaultCycle = async (req, res) => {
     return res.status(500).json({ message: "Internal Server Error", success: false });
   }
 };
+
+
 
 
 module.exports = {

@@ -34,7 +34,7 @@ app.post("/dep", async (req, res) => {
 //admin@airdit.com-0
 //amiyaairdit@gmail.com-1
 //john.doe@example.com-2
-//jane.smith@example.com-3
+//dhinesh@airditsoftware.com-3
 //robert.brown@example.com-4
 //emily.davis@example.com-5
 
@@ -46,7 +46,7 @@ app.use(
   "/api",
   async (req, res, next) => {
     try {
-      const user = await User.findOne({ email: "amiyaairdit@gmail.com" });
+      const user = await User.findOne({ email: "dhinesh454airdit@gmail.com" });
       if (!user) {
         return res.status(401).json({ message: "User not registered" });
       }

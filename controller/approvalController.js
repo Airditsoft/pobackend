@@ -2,21 +2,21 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require("mongoose");
 const PODetails = require('../models/formdetails');
-const logger = require('../logger/logger');
 const User = require('../models/user');
 const Approval = require('../models/approval');
 const POItem = require('../models/formitems');
 const Status = require('../models/status');
 const {approvalSchema} = require('../validation/validator');
-const {getLevels} = require('../ApprovalLevels/getLevels');
-const CustomLevels = require('../ApprovalLevels/customLevels');
 const Attachment = require('../models/attachment');
 const {mail} = require('../utils/email');
 const ApprovalHierarchy = require('../models/approvalhierarchy');
+const AlternateApproval = require('../models/alternateapproval');
+const {isTodayWithinRange}= require('../utils/parseddata');
+const { v4: uuidv4 } = require("uuid"); // Import uuid
 
 
 
-
+// 453226
 
 const showLogs = async (req, res) => {
   const { PONumberId } = req.params;
@@ -54,10 +54,32 @@ const showLogs = async (req, res) => {
           "department.level": level,
         });
 
+        const alternate = await AlternateApproval.findOne({createdBy:i})
+        console.log('alternate',alternate)
+
+        let withinRange =false;
+        let alternateuser;
+        let alternatemail;
+        if(alternate){
+          withinRange = isTodayWithinRange(alternate.fromDate,alternate.toDate);
+        }
+        if(withinRange) {
+          const [departmentId, level] = alternate.alternateApprover.split(" ");
+          const user = await User.findOne({
+            "department.depId": departmentId,
+            "department.level": level,
+          });
+          alternateuser = user.name;
+          alternatemail = user.email;
+        }
+        console.log(alternate)
+
         if (user) {
           logs.push({
-            username: user.name,
+            username:withinRange ? alternateuser : user.name,
+            email:withinRange ? alternatemail:user.email,
             status: "pending",
+            alternateapprovercreatedby:withinRange ? user.name : null,
             comment: null,
             createdAt: null,
           });
@@ -81,9 +103,10 @@ const showLogs = async (req, res) => {
             if (user) {
               logs.push({
                 username: user ? user.name : "Unknown User",
-                status: i.action === "approve" ? "approved" : "rejected",
+                status: i.action === "approve" ? "approved" : i.action === 'reject'? "rejected":i.action==='forward'?'forwarded':i.action==='alternate'?'alternate':'pending',
                 comment: i.comment,
                 createdAt: i.createdAt,
+                approvercreatedby:i.approvercreatedby
               });
             }
 
@@ -99,15 +122,39 @@ const showLogs = async (req, res) => {
             "department.depId": departmentId,
             "department.level": level,
           });
+
   
          
-              // If not in the approval hierarchy, mark it as pending
-              logs.push({
-                username: user.name,
-                status: "pending",
-                comment: null,
-                createdAt:null
-              });
+             
+        const alternate = await AlternateApproval.findOne({createdBy:approvalLevels[i]})
+        console.log(alternate)
+        let withinRange =false;
+        let alternateuser;
+        let alternatemail;
+        if(alternate){
+          withinRange = isTodayWithinRange(alternate.fromDate,alternate.toDate);
+        }
+        if(withinRange) {
+          const [departmentId, level] = alternate.alternateApprover.split(" ");
+          const user = await User.findOne({
+            "department.depId": departmentId,
+            "department.level": level,
+          });
+          alternateuser = user.name;
+          alternatemail = user.email;
+        }
+        console.log(alternate)
+
+        if (user) {
+          logs.push({
+            username:withinRange ? alternateuser : user.name,
+            email:withinRange ? alternatemail:user.email,
+            status: "pending",
+            alternateapprovercreatedby:withinRange ? user.name : null,
+            comment: null,
+            createdAt: null,
+          });
+        }
           
         }
       
@@ -214,7 +261,7 @@ const handleApprovalOrRejection = async (req, res) => {
     }
 
     // // Fetch the PO details within the transaction
-    const app_level = `${req.authInfo.department.depId} ${req.authInfo.department.level}`;
+    let app_level = `${req.authInfo.department.depId} ${req.authInfo.department.level}`;
     const PO = await PODetails.findOne({ _id: PONumberId }).session(session);
 
     // if (!PO) {
@@ -264,7 +311,9 @@ const handleApprovalOrRejection = async (req, res) => {
         }`,
         success: false,
       });
+
     }
+
 
     // let approvalLevels;
     // if (PO.approvaltype === 0) {
@@ -293,9 +342,34 @@ const handleApprovalOrRejection = async (req, res) => {
     //     });
     //   }
     // }
+    const alternates = await AlternateApproval.findOne({
+                      alternateApprover: app_level,
+                      createdBy:PO.currentapprovallevel
+    }).lean();
+
+  let withinRange = false 
+  if(alternates){
+      const today = new Date();
+      const start = new Date(alternates.fromDate);
+      const end = new Date(alternates.toDate);
+      start.setHours(0, 0, 0, 0);
+      end.setHours(0, 0, 0, 0);
+      if (today >= start && today <= end) {
+        console.log('createdby',alternates.createdBy)
+        withinRange=true;
+      }
+  }
+      
+console.log(alternates,withinRange)
+    const [depid , lev ] = PO.currentapprovallevel.split(' ')
+
+    const user = await User.findOne({'department.depId' : depid, 'department.level':lev}).select('name').lean();
+
 
       //check the approval level correctly matched or not .
-        if (PO.currentapprovallevel !== app_level) {
+        if (withinRange ? 
+          PO.currentapprovallevel!== alternates.createdAt && app_level !== alternates.alternateApprover :
+           PO.currentapprovallevel !== app_level) {
         await session.abortTransaction();
         session.endSession();
         return res.status(400).json({
@@ -308,20 +382,24 @@ const handleApprovalOrRejection = async (req, res) => {
     const approvalEntry = {
       departmentId: req.authInfo.department.depId,
       level: req.authInfo.department.level,
+      approvercreatedby:PO.currentapprovallevel === app_level ?  'null' : user.name,
       comment: comment || null,
       action,
       createdAt: new Date(),
     };
 
+    console.log(approvalEntry)
    
     // Handle "approve" action
     let userNotification;
     if (action === "approve") {
-      if (approvalLevels.indexOf(app_level) === approvalLevels.length - 1) {
+      const currentLevel = withinRange ? alternates.createdBy : app_level;
+      if (approvalLevels.indexOf(currentLevel) === approvalLevels.length - 1) {
         PO.ApprovalStatus = approvedStatus.key;
         PO.currentapprovallevel = null;
       } else {
-        const nextLevel = approvalLevels[approvalLevels.indexOf(app_level) + 1];
+        const nextLevel = approvalLevels[approvalLevels.indexOf(currentLevel) + 1];
+        console.log(nextLevel)
         PO.currentapprovallevel = nextLevel;
         console.log('NextLevel:', nextLevel);
         userNotification=nextLevel;
@@ -332,11 +410,12 @@ const handleApprovalOrRejection = async (req, res) => {
 
     // Handle "reject" action
     if (action === "reject") {
+      const currentLevel = withinRange ? alternates.createdBy : app_level;
       if (approvalLevels.indexOf(app_level) === 0) {
         PO.ApprovalStatus = rejectedStatus.key;
         PO.currentapprovallevel = null;
       } else {
-        const prevLevel = approvalLevels[approvalLevels.indexOf(app_level) - 1];
+        const prevLevel = approvalLevels[approvalLevels.indexOf(currentLevel) - 1];
         PO.currentapprovallevel = prevLevel;
         console.log('PrevLevel:', prevLevel);
         userNotification=prevLevel;
@@ -370,15 +449,14 @@ const handleApprovalOrRejection = async (req, res) => {
     console.log('UserNotification:', userNotification);
 
  if(userNotification){   const [depId, lev] = userNotification.split(' ');
-    console.log('DepId:', depId);
-    console.log('Level:', lev); 
+ 
     const user = await User.findOne({
                     'department.depId': depId,
                     'department.level':lev
                 });
                 console.log('User:', user);
 
-    mail(user,PO);//runasynchronously
+    // mail(user,PO);//runasynchronously
     
   }  
     
@@ -598,13 +676,12 @@ const sapLogs = async (req, res) => {
     const PO = await PODetails.findOne({PONumber});
     if (!PO) {
       return res.status(404).json({ message: "PO not found", success: false }); 
-    } 
+    };
+    
+   
 
     const status = await Status.find({ key: PO.ApprovalStatus }, "status").lean();
     const POStatus = status[0].status;
-
-   
-
 
 
     const appr = await ApprovalHierarchy.findOne({ PONumber: PO._id })
@@ -627,20 +704,87 @@ const sapLogs = async (req, res) => {
           "department.level": level,
         });
 
+        const alternate = await AlternateApproval.findOne({createdBy:i})
+
+        let withinRange =false;
+        let alternateuser;
+        let alternatemail;
+        if(alternate){
+          withinRange = isTodayWithinRange(alternate.fromDate,alternate.toDate);
+        }
+        if(withinRange) {
+          const [departmentId, level] = alternate.alternateApprover.split(" ");
+          const user = await User.findOne({
+            "department.depId": departmentId,
+            "department.level": level,
+          });
+          alternateuser = user.name;
+          alternatemail = user.email;
+        }
+        console.log(alternate)
+
         if (user) {
           logs.push({
             username: user.name,
-            email: user.email,
+            email:user.email,
             status: "pending",
+            alternateapprover:withinRange ? alternateuser : null,
+            alternatemail:withinRange ? alternatemail : null,
             comment: null,
             createdAt: null,
           });
         }
       }
 
+      let sequenceCounter = 1;
+
+      const transformedLogs = logs.reduce((acc, log) => {
+        if (log.alternateapprover!==null && log.alternatemail!==null && status == 'pending') {
+          // Add the original user
+          acc.push({
+            id: uuidv4(), // Generate a unique ID using uuid
+            username: log.username,
+            email: log.email,
+            status: log.status,
+            comment: log.comment,
+            createdAt: log.createdAt,
+            sequence: sequenceCounter,
+          });
+      
+          // Add the alternate approver
+          acc.push({
+            id: uuidv4(), // Generate another unique ID
+            username: log.alternateapprover,
+            email: log.alternatemail,
+            status: log.status,
+            comment: log.comment,
+            createdAt: log.createdAt,
+            sequence: sequenceCounter,
+          });
+      
+          sequenceCounter++; // Increment sequence for the next set
+        } else {
+          // Add the original user with incremented sequence
+          acc.push({
+            id: uuidv4(), // Generate a unique ID
+            username: log.username,
+            email: log.email,
+            status: log.status,
+            comment: log.comment,
+            createdAt: log.createdAt,
+            sequence: sequenceCounter,
+          });
+      
+          sequenceCounter++; // Increment sequence for the next entry
+        }
+      
+        return acc;
+      }, []);
+      
+      console.log(transformedLogs);
       
 
-      return res.status(200).json({ PONumber,Approval:POStatus,logs, success: true });
+      return res.status(200).json({PONumber, Approval:POStatus,transformedLogs, success: true });
     } else {
 
         // if(PO.ApprovalStatus === 202 && PO.currentapprovallevel === null){
@@ -655,16 +799,18 @@ const sapLogs = async (req, res) => {
             if (user) {
               logs.push({
                 username: user ? user.name : "Unknown User",
-                email: user.email,
-                status: i.action === "approve" ? "approved" : "rejected",
+                email:user.email,
+                status: i.action === "approve" ? "approved" : i.action === 'reject'? "rejected":i.action==='forward'?'forwarded':i.action==='alternate'?'alternate':'pending',
                 comment: i.comment,
                 createdAt: i.createdAt,
+                alternateapprover:i.approvercreatedby
               });
             }
 
           }
           
             const currentLevel = approvalLevels.indexOf(PO.currentapprovallevel);
+           
             
     if(currentLevel !== -1){
         // If approval is present, iterate through approval levels
@@ -676,25 +822,266 @@ const sapLogs = async (req, res) => {
           });
   
          
-              // If not in the approval hierarchy, mark it as pending
-              logs.push({
-                username: user.name,
-                email: user.email,
-                status: "pending",
-                comment: null,
-                createdAt:null
-              });
-          
+             
+        const alternate = await AlternateApproval.findOne({createdBy:approvalLevels[i]});
+        console.log(i,user,alternate)
+
+        let withinRange =false;
+        let alternateuser;
+        let alternatemail;
+        if(alternate){
+          withinRange = isTodayWithinRange(alternate.fromDate,alternate.toDate);
         }
-      
+        if(withinRange) {
+          const [departmentId, level] = alternate.alternateApprover.split(" ");
+          const user = await User.findOne({
+            "department.depId": departmentId,
+            "department.level": level,
+          });
+          alternateuser = user.name;
+          alternatemail = user.email;
+        }
+        console.log(alternate)
+
+        if (user) {
+          logs.push({
+            username: user.name,
+            email:user.email,
+            status: "pending",
+            alternateapprover:withinRange ? alternateuser : null,
+            alternatapproveremail:withinRange ? alternatemail : null,
+            comment: null,
+            createdAt: null,
+          });
+        }
+      }
          }  
-      return res.status(200).json({ PONumber,Approval:POStatus, logs, success: true });
+
+
+         let sequenceCounter = 1;
+
+         const transformedLogs = logs.reduce((acc, log) => {
+           if (log.alternateapprover!==null && log.alternatemail!==null && status == 'pending') {
+             // Add the original user
+             acc.push({
+               id: uuidv4(), // Generate a unique ID using uuid
+               username: log.username,
+               email: log.email,
+               status: log.status,
+               comment: log.comment,
+               createdAt: log.createdAt,
+               sequence: sequenceCounter,
+             });
+         
+             // Add the alternate approver
+             acc.push({
+               id: uuidv4(), // Generate another unique ID
+               username: log.alternateapprover,
+               email: log.alternatemail,
+               status: log.status,
+               comment: log.comment,
+               createdAt: log.createdAt,
+               sequence: sequenceCounter,
+             });
+         
+             sequenceCounter++; // Increment sequence for the next set
+           } else {
+             // Add the original user with incremented sequence
+             acc.push({
+               id: uuidv4(), // Generate a unique ID
+               username: log.username,
+               email: log.email,
+               status: log.status,
+               comment: log.comment,
+               createdAt: log.createdAt,
+               sequence: sequenceCounter,
+             });
+         
+             sequenceCounter++; // Increment sequence for the next entry
+           }
+         
+           return acc;
+         }, []);
+         
+         console.log(transformedLogs);
+
+
+      
+      return res.status(200).json({ PONumber,Approval:POStatus, transformedLogs, success: true });
     }
   } catch (error) {
     console.error("Error:", error.message);
     return res
       .status(500)
       .json({ message: "An error occurred", success: false });
+  }
+};
+
+
+const poActions = async (req, res) => {
+
+  console.log(req.body)
+  const payload = req.body;
+  const { PONumberId } = req.params;
+  console.log(payload,PONumberId)
+
+  try {
+    // Find the PO by ID
+    const PO = await PODetails.findById(PONumberId);
+    if (!PO) {
+      return res.status(400).json({ message: 'PO Not Found', success: false });
+    }
+
+    const currentapprovallevel = `${req.authInfo.department.depId} ${req.authInfo.department.level}`;
+    console.log('current',currentapprovallevel)
+    let alternate ;
+    if(PO.currentapprovallevel !== currentapprovallevel){
+      alternate = await AlternateApproval.findOne({createdBy:PO.currentapprovallevel});
+      if(!alternate){
+        return res.status(404).json({message:'Cant forward Try again',success:false})
+      }
+    }
+
+    
+
+    let withinRange =false;
+    let alternateuser;
+    let alternatemail;
+    if(alternate){
+      withinRange = isTodayWithinRange(alternate.fromDate,alternate.toDate);
+    }
+    if(withinRange) {
+      const [departmentId, level] = alternate.createdBy.split(" ");
+      const user = await User.findOne({
+        "department.depId": departmentId,
+        "department.level": level,
+      });
+      console.log('user',user)
+      alternateuser = user.name;
+      alternatemail = user.email;
+    }
+    console.log(alternate,withinRange)
+
+    // Find the approval hierarchy for the PO
+    const approval = await ApprovalHierarchy.findOne({ PONumber: PONumberId });
+    if (!approval) {
+      return res.status(400).json({ message: 'Approval not set. Check Again', success: false });
+    }
+
+    // Find the user by name
+    const user = await User.findOne({ name: payload.name });
+    if (!user) {
+      return res.status(400).json({ message: `${payload.name} not found in users`, success: false });
+    }
+
+
+    // Get the current user's index in the approval hierarchy
+    const index = approval.approval_hierarchy.indexOf(PO.currentapprovallevel);
+
+    // Check if the new approver already exists in the hierarchy
+    const existingApprover = approval.approval_hierarchy.includes(`${user.department.depId} ${user.department.level}`);
+    let existingApproverIndex;
+    if (existingApprover) {
+      existingApproverIndex = approval.approval_hierarchy.indexOf(`${user.department.depId} ${user.department.level}`);
+      if (existingApproverIndex === index) {
+        return res.status(400).json({ message: `Denied! ${data.name} is already an approver.`, success: false });
+      }
+    }
+
+    // Define the new approval level
+    const approvalLevel = `${user.department.depId} ${user.department.level}`;
+
+    // Remove the existing approver if they exist
+    if (existingApprover) {
+      approval.approval_hierarchy.splice(existingApproverIndex, 1);
+    }
+
+    // Add the new approver after the current user's index
+    approval.approval_hierarchy.splice(index + 1, 0, approvalLevel);
+
+    // Update the approval hierarchy in the database
+    await approval.save();
+
+    
+    // Update the PO's current approval level
+    PO.currentapprovallevel = approvalLevel;
+    PO.Read = 0 ;
+    await PO.save();
+
+    
+console.log(alternateuser)
+   
+    // Define the new approval action
+    const newApprovalAction = {
+      departmentId: req.authInfo.department.depId,
+      level: req.authInfo.department.level,
+      comment: null,
+      action: payload.action,
+      approvercreatedby : withinRange? alternateuser : null,
+      createdAt: new Date(),
+    };
+
+    console.log('---------------------------->',alternateuser,newApprovalAction)
+
+    // Update or create the Approval document
+    const updatedApproval = await Approval.findOneAndUpdate(
+      { PONumber: PONumberId }, // Query to find the document
+      {
+        $push: { approval_hierarchy: newApprovalAction }, // Push the new action
+      },
+      {
+        upsert: true, // Create the document if it doesn't exist
+        new: true, // Return the updated document
+      }
+    );
+
+    // Return success response
+    return res.status(200).json({ message: `${payload.action} updated successfully`, success: true });
+  } catch (error) {
+    console.error('Error in poActions:', error);
+    return res.status(500).json({ message: 'Internal Server Error', success: false });
+  }
+};
+
+
+const alternateAction = async (req, res) => {
+  const payload = req.body;
+
+  try {
+      // Find the user by name
+      const user = await User.findOne({ name: payload.name });
+      if (!user) {
+          return res.status(400).json({ message: `${payload.name} not found in users`, success: false });
+      }
+
+      // Define the new approval level
+      const alternateApprover = `${user.department.depId} ${user.department.level}`;
+
+      // Data to be updated or inserted
+      const updateData = {
+          $set: {
+              alternateApprover,
+              createdBy: `${req.authInfo.department.depId} ${req.authInfo.department.level}`,
+              fromDate: payload.fromDate,
+              toDate: payload.toDate
+          }
+      };
+
+      // Update or create the Approval document
+      const updatedApproval = await AlternateApproval.findOneAndUpdate(
+          { createdBy: `${req.authInfo.department.depId} ${req.authInfo.department.level}` }, // Query to find the document
+          updateData,
+          {
+              upsert: true, // Create the document if it doesn't exist
+              new: true // Return the updated document
+          }
+      );
+
+      // Return success response
+      return res.status(200).json({ message: `Alternate approval updated successfully`, success: true });
+  } catch (error) {
+      console.error('Error in AlternateAction:', error);
+      return res.status(500).json({ message: 'Internal Server Error', success: false });
   }
 };
 
@@ -707,7 +1094,9 @@ module.exports = {
                     getPOComments,
                     addComments,
                     showLogs,
-                    sapLogs
+                    sapLogs,
+                    poActions,
+                    alternateAction
                   
                   };
 

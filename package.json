@@ -28,6 +28,7 @@
     "passport": "^0.7.0",
     "passport-azure-ad": "^4.3.5",
     "redis": "^4.7.0",
+    "uuid": "^11.1.0",
     "winston": "^3.17.0"
   },
   "devDependencies": {

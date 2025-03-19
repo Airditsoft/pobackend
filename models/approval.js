@@ -25,7 +25,11 @@ const approvalSchema = new mongoose.Schema({
           },
           action: { 
             type: String
-           },
+          },
+          approvercreatedby:{
+            type:String,
+            default:null
+          },
           createdAt: { 
             type: Date, 
             default: Date.now 

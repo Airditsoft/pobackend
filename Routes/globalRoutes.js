@@ -3,8 +3,8 @@ const globalRoutes = require("express").Router();
 const { isAuthenticated ,isAdmin} = require("../Authentication/authentication");
 const { userRegister, getuserProfile } = require("../controller/usercontroller");
 const {getPOdetails,saveAllPOData,POdetail,getAvailableFields, approvalCycle, defaultCycle} = require("../controller/poController");
-const { handleApprovalOrRejection, getAnalytics, getPOComments, getApprovalHistory, addComments,showLogs, sapLogs} = require('../controller/approvalController');
-const {customApproval,getAllDepartments} = require("../controller/customcontroller");
+const { handleApprovalOrRejection, getAnalytics, getPOComments, getApprovalHistory, addComments,showLogs, sapLogs, poActions, alternateAction} = require('../controller/approvalController');
+const {getAllDepartments, departmentaction} = require("../controller/customcontroller");
 const {uploadMultipleFiles, getAttachment, getLinks, uploadLinks} = require('../controller/poattachment');
 const {upload} = require('../Middleware/multer');
 const { saveGlobalRules,getGlobalRules, deleteRules, getdefaultlevels, updateDefaultLevel } = require("../controller/globalRulesController");
@@ -21,17 +21,19 @@ globalRoutes.get('/profile',isAuthenticated,getuserProfile);
 //po 
 globalRoutes.get('/getpo/:PONumberId',isAuthenticated,POdetail);
 globalRoutes.get("/savedetails",saveAllPOData);
-globalRoutes.post("/custom-approval/:PONumberId",isAuthenticated,customApproval);
 globalRoutes.get('/analytics',isAuthenticated,getAnalytics);
 globalRoutes.get('/departments',isAuthenticated,getAllDepartments);
 globalRoutes.get("/available-fields",isAuthenticated, getAvailableFields);
 globalRoutes.get('/approval-cycle/:ruleID',isAuthenticated,approvalCycle);
 globalRoutes.get('/default-cycle',isAuthenticated,defaultCycle);
+globalRoutes.get('/dep-action',isAuthenticated,departmentaction);
 
 //approval or rejected ,history
 globalRoutes.put('/approval-rejection/:PONumberId', isAuthenticated, handleApprovalOrRejection);
 globalRoutes.get('/logs/:PONumberId',isAuthenticated,showLogs);
 globalRoutes.get('/pocomments/:PONumberId',isAuthenticated,getPOComments);
+globalRoutes.put('/save-action/:PONumberId',isAuthenticated,poActions);
+globalRoutes.put('/save-alternate-action',isAuthenticated,alternateAction);
   
 
 //uploadfiles & attachment
