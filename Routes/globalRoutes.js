@@ -2,7 +2,7 @@ const globalRoutes = require("express").Router();
 
 const { isAuthenticated ,isAdmin} = require("../Authentication/authentication");
 const { userRegister, getuserProfile } = require("../controller/usercontroller");
-const {getPOdetails,saveAllPOData,POdetail,getAvailableFields, approvalCycle, defaultCycle} = require("../controller/poController");
+const {getPOdetails,saveAllPOData,POdetail,getAvailableFields, approvalCycle, defaultCycle, alternateData} = require("../controller/poController");
 const { handleApprovalOrRejection, getAnalytics, getPOComments, getApprovalHistory, addComments,showLogs, sapLogs, poActions, alternateAction} = require('../controller/approvalController');
 const {getAllDepartments, departmentaction} = require("../controller/customcontroller");
 const {uploadMultipleFiles, getAttachment, getLinks, uploadLinks} = require('../controller/poattachment');
@@ -34,6 +34,7 @@ globalRoutes.get('/logs/:PONumberId',isAuthenticated,showLogs);
 globalRoutes.get('/pocomments/:PONumberId',isAuthenticated,getPOComments);
 globalRoutes.put('/save-action/:PONumberId',isAuthenticated,poActions);
 globalRoutes.put('/save-alternate-action',isAuthenticated,alternateAction);
+globalRoutes.get('/alternate-data',isAuthenticated,alternateData)
   
 
 //uploadfiles & attachment

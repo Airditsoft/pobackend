@@ -1016,6 +1016,64 @@ const defaultCycle = async (req, res) => {
   }
 };
 
+const alternateData = async (req, res) => {
+  try {
+    // Fetch all alternate approvals
+    const alternate = await AlternateApproval.find().lean();
+
+    // If no alternate approvals are found, return an empty array
+    if (alternate.length === 0) {
+      return res.status(200).json({
+        alternate: [],
+        message: 'No Alternate Approver Found.',
+        success: true,
+      });
+    }
+
+    // Loop through each alternate approval and enrich with user details
+    for (let i of alternate) {
+      try {
+        // Fetch the original approver's details
+        const [depId, level] = i.createdBy.split(" ");
+        const user = await User.findOne({ "department.depId": depId, "department.level": level }).lean();
+
+        // Fetch the alternate approver's details
+        const [altDepId, altLevel] = i.alternateApprover.split(" ");
+        const alternateUser = await User.findOne({ "department.depId": altDepId, "department.level": altLevel }).lean();
+
+        // Update the createdBy and alternateApprover fields with user names
+        if (user) {
+          i.createdBy = user.name;
+        } else {
+          i.createdBy = "Unknown User"; // Handle case where user is not found
+        }
+
+        if (alternateUser) {
+          i.alternateApprover = alternateUser.name;
+        } else {
+          i.alternateApprover = "Unknown User"; // Handle case where alternate user is not found
+        }
+      } catch (error) {
+        console.error("Error fetching user details:", error.message);
+        // Skip this iteration if there's an error fetching user details
+        continue;
+      }
+    }
+
+    // Return the enriched alternate data
+    return res.status(200).json({
+      alternate,
+      message: 'Successfully Fetched the Alternate Approver.',
+      success: true,
+    });
+  } catch (error) {
+    console.error("Error Fetching Alternate Approver:", error.message);
+    return res.status(500).json({
+      message: "Internal Server Error",
+      success: false,
+    });
+  }
+};
 
 
 
@@ -1025,5 +1083,6 @@ module.exports = {
   POdetail,
   getAvailableFields,
   approvalCycle,
-  defaultCycle
+  defaultCycle,
+  alternateData
 };

@@ -46,7 +46,10 @@ app.use(
   "/api",
   async (req, res, next) => {
     try {
-      const user = await User.findOne({ email: "dhinesh454airdit@gmail.com" });
+ 
+     
+      const user = await User.findOne({ email: "dhinesh@airditsoftware.com" });
+      console.log(user)
       if (!user) {
         return res.status(401).json({ message: "User not registered" });
       }
@@ -55,7 +58,7 @@ app.use(
       next(); // Proceed to the next middleware or route
     } catch (error) {
       res.status(500).json({ message: error.message });
-    }
+    }``
   },
   globalRoute
 );
